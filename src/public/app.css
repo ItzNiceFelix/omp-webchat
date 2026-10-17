@@ -186,6 +186,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 	grid-template-areas: "hdr hdr hdr" "side main agents";
 	height: 100dvh;
 	min-height: 0;
+	overflow: hidden;
 }
 #app.agents-open { --agents-w: 380px; }
 
