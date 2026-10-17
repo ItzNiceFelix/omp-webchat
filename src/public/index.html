@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>omp webchat</title>
+		<link rel="stylesheet" href="/app.css?v=__V__" />
+	</head>
+	<body>
+		<header id="hdr">
+			<div class="brand"><span class="dot" id="conn"></span> omp<span class="dim">webchat</span></div>
+			<button class="chip" id="sessionBtn" title="Sessions">session</button>
+			<button class="chip" id="modelBtn" title="Model">model</button>
+			<button class="chip" id="thinkingBtn" title="Thinking level">thinking</button>
+			<button class="chip" id="fastBtn" title="Fast mode">fast</button>
+			<button class="chip" id="slowBtn" title="Slow mode">slow</button>
+			<button class="chip" id="compactBtn" title="Auto compaction">compact</button>
+			<button class="chip" id="warmingBtn" title="Cache warming">warm</button>
+			<span class="spacer"></span>
+			<span class="meta" id="ctx">–</span>
+			<span class="meta" id="tps"></span>
+			<button class="chip" id="commandsBtn">commands</button>
+			<button class="chip" id="btwBtn" title="Side question">/btw</button>
+			<button class="chip danger" id="stopBtn" title="Abort (Esc)">stop</button>
+		</header>
+		<aside id="side">
+			<section id="statusCard" class="card">
+				<h3>session</h3>
+				<div class="kv" id="sessionMeta"></div>
+				<div class="statusline" id="statusLine"></div>
+			</section>
+			<section id="todoCard" class="card hidden">
+				<h3>todos</h3>
+				<div id="todoBody"></div>
+			</section>
+			<section id="queueCard" class="card hidden">
+				<h3>queued</h3>
+				<div id="queueBody"></div>
+			</section>
+			<section id="agentsCard" class="card hidden">
+				<h3>agents <span class="dim" id="agentCount"></span></h3>
+				<div id="agentsBody"></div>
+			</section>
+			<section id="goalCard" class="card hidden">
+				<h3>goal</h3>
+				<div id="goalBody"></div>
+			</section>
+			<section id="widgetCard" class="card hidden">
+				<h3>widgets</h3>
+				<div id="widgetBody"></div>
+			</section>
+		</aside>
+		<main id="main">
+			<div id="transcript"></div>
+			<div id="composer">
+				<div id="attachments"></div>
+				<div class="row">
+					<textarea id="input" rows="1" placeholder="Message omp…  (/ for commands, Enter sends, Esc aborts)"></textarea>
+					<div class="col">
+						<button id="sendBtn" class="primary">send</button>
+						<button id="attachBtn" class="ghost" title="Attach image">img</button>
+					</div>
+				</div>
+				<div class="row small">
+					<label><input type="checkbox" id="steerBox" checked /> steer while busy</label>
+					<span class="dim" id="hint"></span>
+				</div>
+				<div id="palette" class="hidden"></div>
+				<input type="file" id="fileInput" accept="image/*" multiple hidden />
+			</div>
+		</main>
+		<div id="toasts"></div>
+		<div id="modalWrap" class="hidden"><div id="modal"></div></div>
+		<script src="/app.js?v=__V__" type="module"></script>
+	</body>
+</html>

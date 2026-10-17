@@ -1,0 +1,17 @@
+{
+  "name": "omp-webchat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Localhost browser chat for omp sessions, backed by `omp --mode rpc`",
+  "type": "module",
+  "bin": {
+    "omp-webchat": "./src/server.ts"
+  },
+  "omp": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "check": "bun run src/server.ts --selftest"
+  }
+}
