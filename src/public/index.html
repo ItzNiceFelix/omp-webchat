@@ -21,9 +21,20 @@
 			<span class="meta" id="tps"></span>
 			<button class="chip" id="commandsBtn">commands</button>
 			<button class="chip" id="btwBtn" title="Side question">/btw</button>
+			<button class="chip" id="liveBtn" title="Live voice session (mic/speakers run on the omp host)">live</button>
 			<button class="chip danger" id="stopBtn" title="Abort (Esc)">stop</button>
 		</header>
 		<aside id="side">
+			<section id="chatsCard" class="card">
+				<h3>
+					chats
+					<span class="spacer"></span>
+					<button class="mini" id="newChatBtn" title="New chat">＋</button>
+					<button class="mini" id="refreshChatsBtn" title="Refresh">⟳</button>
+				</h3>
+				<input type="text" id="chatSearch" placeholder="search chats…" />
+				<div id="chatList"></div>
+			</section>
 			<section id="statusCard" class="card">
 				<h3>session</h3>
 				<div class="kv" id="sessionMeta"></div>
@@ -44,6 +55,14 @@
 			<section id="goalCard" class="card hidden">
 				<h3>goal</h3>
 				<div id="goalBody"></div>
+			</section>
+			<section id="liveCard" class="card hidden">
+				<h3>
+					live
+					<span class="spacer"></span>
+					<button class="mini" id="liveMuteBtn" title="Toggle microphone mute">mute</button>
+				</h3>
+				<div id="liveBody"></div>
 			</section>
 			<section id="widgetCard" class="card hidden">
 				<h3>widgets</h3>

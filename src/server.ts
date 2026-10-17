@@ -10,9 +10,9 @@
  * Upgrade path: a process pool keyed by session dir, if multi-session tabs are ever needed.
  */
 import type { ServerWebSocket } from "bun";
-import { readdir, open, stat } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 /** Frames on the wire are opaque JSON objects; only the routing keys are validated. */
 type Frame = Record<string, unknown> & { type?: unknown; id?: unknown };
@@ -49,6 +49,8 @@ const HOST = String(opts.host ?? "127.0.0.1");
 const OMP_BIN = String(opts.omp ?? Bun.which("omp") ?? "omp");
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const SESSIONS_ROOT = join(Bun.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".omp", "agent"), "sessions");
+/** Scratch root for `webchat://` reads/writes: plugin-owned, outside node_modules. */
+const DATA_DIR = join(Bun.env.PI_CONFIG_DIR ?? join(homedir(), ".omp"), "plugins", "data", "omp-webchat");
 
 // ---------------------------------------------------------------- child process
 
@@ -78,6 +80,13 @@ function broadcast(frame: Frame) {
 	}
 }
 
+function writeRpc(frame: Frame) {
+	if (!child) return false;
+	child.stdin.write(`${JSON.stringify(frame)}\n`);
+	child.stdin.flush();
+	return true;
+}
+
 function rpc(command: Frame & { type: string }, timeoutMs = 60_000): Promise<Frame> {
 	const id = `wx:${++childSeq}`;
 	const { promise, resolve: settle, reject } = Promise.withResolvers<Frame>();
@@ -89,9 +98,7 @@ function rpc(command: Frame & { type: string }, timeoutMs = 60_000): Promise<Fra
 		clearTimeout(timer);
 		settle(frame);
 	});
-	if (child) child.stdin.write(`${JSON.stringify({ id, ...command })}\n`);
-	if (child) child.stdin.flush();
-	else {
+	if (!writeRpc({ id, ...command })) {
 		clearTimeout(timer);
 		waiters.delete(id);
 		reject(new Error("omp child is not running"));
@@ -104,6 +111,21 @@ const chunkSets = new Map<string, { count: number; parts: string[]; got: number 
 
 function handleObject(frame: Frame) {
 	if (frame.type === "ready") respawnDelay = 1000;
+	if (frame.type === "host_tool_call") {
+		try {
+			onHostToolCall(frame);
+		} catch (err) {
+			completeHostTool(frame.id, `host tool failed: ${String(err)}`, true);
+		}
+		return;
+	}
+	if (frame.type === "host_uri_request") {
+		void onHostUriRequest(frame).catch((err) => {
+			writeRpc({ type: "host_uri_result", id: frame.id, isError: true, error: String(err) });
+		});
+		return;
+	}
+	if (frame.type === "host_tool_cancel" || frame.type === "host_uri_cancel") return;
 	if (typeof frame.id !== "string") {
 		broadcast(frame);
 		return;
@@ -147,15 +169,14 @@ function reassembleChunk(frame: Frame) {
 
 function handleLine(line: string) {
 	if (!line.trim()) return;
-	let frame: Frame;
 	try {
-		frame = JSON.parse(line) as Frame;
-	} catch {
-		broadcast({ type: "wx:log", level: "warn", text: `unparsable frame (${line.length} bytes)` });
-		return;
+		const frame = JSON.parse(line) as Frame;
+		if (frame.type === "rpc_chunk") reassembleChunk(frame);
+		else handleObject(frame);
+	} catch (err) {
+		// A bridge must survive a handler bug: report it and keep the session alive.
+		broadcast({ type: "wx:log", level: "error", text: `frame handling failed: ${String(err)}` });
 	}
-	if (frame.type === "rpc_chunk") reassembleChunk(frame);
-	else handleObject(frame);
 }
 
 async function pump(stream: ReadableStream<Uint8Array>, onText: (text: string) => void) {
@@ -170,7 +191,9 @@ async function pump(stream: ReadableStream<Uint8Array>, onText: (text: string) =
 
 function spawnOmp() {
 	if (shuttingDown || child) return;
-	const cmd = [OMP_BIN, "--mode", "rpc", ...ompArgs];
+	// rpc-ui = extension UI *and* tool UI: tool dialogs, approvals, and the `ask` tool are
+	// mounted only in this mode (`--mode rpc` mounts 11 tools, `rpc-ui` mounts ask as well).
+	const cmd = [OMP_BIN, "--mode", "rpc-ui", ...ompArgs];
 	// This server may itself run under `BUN_BE_BUN=1 omp`; the child must be a real omp, not bun.
 	const env = { ...Bun.env };
 	delete env.BUN_BE_BUN;
@@ -214,6 +237,113 @@ function spawnOmp() {
 	void rpc({ type: "negotiate_protocol", protocolVersion: 2 }, 10_000).catch(() => {});
 	void rpc({ type: "set_subagent_subscription", level: "events" }, 10_000).catch(() => {});
 	void rpc({ type: "set_ask_dialog", enabled: true }, 10_000).catch(() => {});
+	void rpc({ type: "set_host_tools", tools: HOST_TOOLS }, 10_000).catch(() => {});
+	void rpc(
+		{
+			type: "set_host_uri_schemes",
+			schemes: [{ scheme: "webchat", description: "webchat scratch files (text, under the plugin data dir)", writable: true, immutable: false }],
+		},
+		10_000,
+	).catch(() => {});
+}
+
+// ---------------------------------------------------------------- host-owned tools + URIs
+
+/**
+ * Tools the browser side answers. Registered with `set_host_tools`; the runtime calls back
+ * here (not into the browser), so results are ordinary tool results for the model.
+ */
+const HOST_TOOLS = [
+	{
+		name: "webchat_card",
+		label: "Render Card",
+		description: "Render a card (title + markdown body) in the user's webchat transcript. Use for plans, comparisons, tables, or diagrams the user should read as a card rather than prose.",
+		parameters: {
+			type: "object",
+			properties: { title: { type: "string" }, body: { type: "string", description: "markdown" } },
+			required: ["title", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "webchat_open_url",
+		label: "Open In Browser",
+		description: "Open a URL in the user's default browser (the machine running webchat).",
+		parameters: {
+			type: "object",
+			properties: { url: { type: "string" } },
+			required: ["url"],
+			additionalProperties: false,
+		},
+	},
+] as const;
+
+function completeHostTool(id: unknown, text: string, isError = false) {
+	if (typeof id !== "string") return;
+	writeRpc({ type: "host_tool_result", id, isError, result: { content: [{ type: "text", text }] } });
+}
+
+function onHostToolCall(frame: Frame) {
+	const name = String(frame.toolName ?? "");
+	const args = (frame.arguments ?? {}) as Record<string, unknown>;
+	if (name === "webchat_card") {
+		const title = String(args.title ?? "card");
+		const body = String(args.body ?? "");
+		broadcast({ type: "wx:card", title, body });
+		completeHostTool(frame.id, `card "${title}" rendered in the webchat transcript`);
+		return;
+	}
+	if (name === "webchat_open_url") {
+		const url = String(args.url ?? "");
+		if (!/^https?:\/\//i.test(url)) {
+			completeHostTool(frame.id, `refusing to open non-http(s) url: ${url}`, true);
+			return;
+		}
+		const opener =
+			process.platform === "win32"
+				? ["cmd", "/c", "start", "", url]
+				: process.platform === "darwin"
+					? ["open", url]
+					: ["xdg-open", url];
+		Bun.spawn(opener, { stdio: ["ignore", "ignore", "ignore"] }).unref();
+		completeHostTool(frame.id, `opened ${url} in the default browser`);
+		return;
+	}
+	completeHostTool(frame.id, `unknown host tool: ${name}`, true);
+}
+
+/** `webchat://<path>` reads and writes text files under the plugin's data root. */
+function dataPath(rel: string) {
+	const full = resolve(join(DATA_DIR, rel));
+	return full.startsWith(DATA_DIR + sep) ? full : null;
+}
+
+async function onHostUriRequest(frame: Frame) {
+	const id = frame.id;
+	const url = String(frame.url ?? "");
+	const rel = url.replace(/^webchat:\/\//i, "").replace(/^\/+/, "");
+	const full = dataPath(rel) ?? "";
+	if (!full) {
+		writeRpc({ type: "host_uri_result", id, isError: true, error: `path escapes webchat:// root: ${url}` });
+		return;
+	}
+	if (frame.operation === "write") {
+		try {
+			await mkdir(dirname(full), { recursive: true });
+			await writeFile(full, String(frame.content ?? ""), "utf8");
+			writeRpc({ type: "host_uri_result", id });
+		} catch (err) {
+			writeRpc({ type: "host_uri_result", id, isError: true, error: String(err) });
+		}
+		return;
+	}
+	try {
+		const text = await readFile(full, "utf8");
+		const contentType = full.endsWith(".json") ? "application/json" : full.endsWith(".md") ? "text/markdown" : "text/plain";
+		writeRpc({ type: "host_uri_result", id, content: text, contentType });
+	} catch (err) {
+		writeRpc({ type: "host_uri_result", id, isError: true, error: `cannot read ${url}: ${String(err)}` });
+	}
 }
 
 // ---------------------------------------------------------------- session listing
@@ -293,6 +423,7 @@ async function listSessions(limit: number) {
 					path,
 					id: typeof head.id === "string" ? head.id : name,
 					name: label.replace(/[\u0000-\u001f]/g, "").slice(0, 120),
+					firstUser: firstUser.slice(0, 300),
 					titled: Boolean(title),
 					bytes: info.size,
 					mtime: info.mtimeMs,
@@ -337,13 +468,30 @@ const server = Bun.serve<{ id: string }>({
 			return Response.json({
 				cwd: CWD,
 				omp: OMP_BIN,
-				args: ["--mode", "rpc", ...ompArgs],
+				args: ["--mode", "rpc-ui", ...ompArgs],
 				child: child ? { status: "running", pid: child.pid } : { status: "stopped" },
 				sessionsRoot: SESSIONS_ROOT,
+				dataDir: DATA_DIR,
+				hostTools: HOST_TOOLS.map((tool) => tool.name),
 				bucket: bucketFor(CWD),
 			});
 		}
 		if (url.pathname === "/api/sessions") {
+			if (req.method === "DELETE") {
+				const target = resolve(url.searchParams.get("path") ?? "");
+				if (!target.startsWith(`${SESSIONS_ROOT}${sep}`) || !target.endsWith(".jsonl"))
+					return Response.json({ ok: false, error: "path is outside the session store" }, { status: 400 });
+				const info = await stat(target).catch(() => null);
+				if (!info?.isFile()) return Response.json({ ok: false, error: "no such session file" }, { status: 404 });
+				try {
+					await unlink(target);
+					const artifacts = target.slice(0, -".jsonl".length);
+					if ((await stat(artifacts).catch(() => null))?.isDirectory()) await rm(artifacts, { recursive: true, force: true });
+				} catch (err) {
+					return Response.json({ ok: false, error: String(err) }, { status: 500 });
+				}
+				return Response.json({ ok: true, deleted: target });
+			}
 			return Response.json({ sessions: await listSessions(Number(url.searchParams.get("limit") ?? 40)) });
 		}
 		if (url.pathname === "/api/restart" && req.method === "POST") {
@@ -394,8 +542,7 @@ const server = Bun.serve<{ id: string }>({
 				return;
 			}
 			if (!child) return;
-			child.stdin.write(`${JSON.stringify(frame)}\n`);
-			child.stdin.flush();
+			writeRpc(frame);
 		},
 	},
 });
@@ -407,7 +554,7 @@ if (opts.selftest) {
 }
 
 console.log(`omp-webchat  http://${HOST}:${PORT}   cwd=${CWD}`);
-console.log(`  omp: ${OMP_BIN} --mode rpc ${ompArgs.join(" ")}`.trimEnd());
+console.log(`  omp: ${OMP_BIN} --mode rpc-ui ${ompArgs.join(" ")}`.trimEnd());
 if (opts.open) {
 	const url = `http://${HOST}:${PORT}`;
 	const opener =

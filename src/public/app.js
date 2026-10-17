@@ -12,6 +12,8 @@ const state = {
 	stats: null,
 	messages: [],
 	keys: [],
+	chats: [],
+	live: { active: false, phase: "", input: 0, output: 0, turns: new Map() },
 	tools: new Map(),
 	cards: new Map(),
 	agentSlots: new Map(),
@@ -217,6 +219,10 @@ function onServerFrame(frame) {
 		if (frame.status === "exited") appendSystemRow(`omp process exited (code ${frame.code})`, "error");
 		return;
 	}
+	if (frame.type === "wx:card") {
+		appendCard(frame.title, frame.body);
+		return;
+	}
 	if (frame.type === "wx:log") {
 		if (frame.level === "stderr") appendSystemRow(frame.text, "system");
 		else toast(frame.text, "warn");
@@ -248,6 +254,7 @@ function onRpcFrame(frame) {
 			const expected = typeof frame.messageCount === "number" ? frame.messageCount : 0;
 			if (state.messages.length < 2 || expected > state.messages.length) void refreshTranscript();
 			void refreshState();
+			void loadChats();
 			return;
 		}
 		case "session_settled":
@@ -341,6 +348,8 @@ function onRpcFrame(frame) {
 		case "live_levels":
 		case "live_transcript":
 		case "live_end":
+			onLiveFrame(frame);
+			return;
 		case "tool_stream_update":
 			return;
 		default:
@@ -537,6 +546,18 @@ function applyUsage(node, msg) {
 
 function appendSystemRow(text, kind) {
 	const node = el("div", `msg ${kind}`, text);
+	transcript().append(node);
+	scrollDown();
+	return node;
+}
+
+/** A card pushed by the `webchat_card` host tool (or any host that broadcasts `wx:card`). */
+function appendCard(title, body) {
+	const node = el("div", "msg card");
+	node.append(el("h4", null, title ?? "card"));
+	const content = el("div", "blocks");
+	content.innerHTML = md(body ?? "");
+	node.append(content);
 	transcript().append(node);
 	scrollDown();
 	return node;
@@ -803,6 +824,230 @@ function renderWidgets() {
 	}
 }
 
+// ---------------------------------------------------------------- chat history
+
+function groupLabel(ms) {
+	const now = new Date();
+	const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	if (ms >= startOfToday) return "today";
+	if (ms >= startOfToday - 86_400_000) return "yesterday";
+	if (ms >= startOfToday - 6 * 86_400_000) return "previous 7 days";
+	return "older";
+}
+
+async function loadChats() {
+	try {
+		const res = await fetch(`/api/sessions?limit=100`).then((r) => r.json());
+		state.chats = res.sessions ?? [];
+		renderChats();
+	} catch (err) {
+		toast(`chat list failed: ${err.message ?? err}`, "warn");
+	}
+}
+
+function renderChats() {
+	const list = $("chatList");
+	if (!list) return;
+	const filter = $("chatSearch").value.trim().toLowerCase();
+	const rows = state.chats.filter((c) => !filter || `${c.name} ${c.firstUser ?? ""} ${c.id}`.toLowerCase().includes(filter));
+	const active = state.session?.sessionFile;
+	// A brand-new session has no file on disk until its first entry lands: show it anyway.
+	if (active && !filter && !rows.some((c) => c.path === active))
+		rows.unshift({ path: active, id: "", name: state.session?.sessionName || "new chat", firstUser: "", mtime: Date.now(), synthetic: true });
+	list.replaceChildren();
+	if (!rows.length) {
+		list.append(el("div", "dim", filter ? "no match" : "no chats yet"));
+		return;
+	}
+	let group = "";
+	for (const chat of rows) {
+		const label = groupLabel(chat.mtime);
+		if (label !== group) {
+			group = label;
+			list.append(el("div", "chatGroup", label));
+		}
+		const row = el("div", `chatRow${chat.path === active ? " active" : ""}`);
+		row.append(el("span", "title", chat.name));
+		const acts = el("div", "acts");
+		const rename = el("button", null, "✎");
+		rename.title = "rename";
+		rename.addEventListener("click", (ev) => {
+			ev.stopPropagation();
+			renameChat(chat);
+		});
+		acts.append(rename);
+		if (chat.path !== active) {
+			const del = el("button", "del", "🗑");
+			del.title = "delete";
+			del.addEventListener("click", (ev) => {
+				ev.stopPropagation();
+				deleteChat(chat);
+			});
+			acts.append(del);
+		}
+		row.append(acts);
+		row.append(el("span", "time", timeAgo(chat.mtime)));
+		row.title = `${chat.name}\n${chat.path}`;
+		row.addEventListener("click", () => void switchChat(chat.path));
+		list.append(row);
+	}
+}
+
+async function switchChat(sessionPath) {
+	try {
+		await must({ type: "switch_session", sessionPath });
+		closeModal();
+		await bootstrap();
+		await loadChats();
+		toast("chat resumed — the runtime replays its context", "info");
+	} catch (err) {
+		notify(`switch failed: ${err.message ?? err}`);
+	}
+}
+
+async function newChat() {
+	try {
+		await must({ type: "new_session" });
+		closeModal();
+		await bootstrap();
+		await loadChats();
+		$("input").focus();
+	} catch (err) {
+		notify(`new chat failed: ${err.message ?? err}`);
+	}
+}
+
+function renameChat(chat) {
+	openModal("rename chat", (box) => {
+		const input = el("input");
+		input.type = "text";
+		input.value = chat.name;
+		box.append(input);
+		const foot = el("div", "foot");
+		const ok = el("button", "primary", "save");
+		const cancel = el("button", "ghost", "cancel");
+		cancel.addEventListener("click", closeModal);
+		ok.addEventListener("click", async () => {
+			const name = input.value.trim();
+			if (!name) return;
+			try {
+				await must({ type: "set_session_name", name });
+				closeModal();
+				await refreshState();
+				await loadChats();
+			} catch (err) {
+				notify(`rename failed: ${err.message ?? err}`);
+			}
+		});
+		input.addEventListener("keydown", (ev) => {
+			if (ev.key === "Enter") ok.click();
+		});
+		foot.append(cancel, ok);
+		box.append(foot);
+		input.focus();
+		input.select();
+	});
+}
+
+function deleteChat(chat) {
+	openModal(`delete “${chat.name}”?`, (box) => {
+		box.append(el("div", "pre", `${chat.path}\n\nDeletes this chat's transcript file from disk. Cannot be undone.`));
+		const foot = el("div", "foot");
+		const cancel = el("button", "ghost", "cancel");
+		const del = el("button", "primary", "delete");
+		cancel.addEventListener("click", closeModal);
+		del.addEventListener("click", async () => {
+			try {
+				const res = await fetch(`/api/sessions?path=${encodeURIComponent(chat.path)}`, { method: "DELETE" }).then((r) => r.json());
+				if (!res.ok) throw new Error(res.error ?? "delete failed");
+				closeModal();
+				await loadChats();
+				toast(`deleted ${chat.name}`, "warn");
+			} catch (err) {
+				notify(`delete failed: ${err.message ?? err}`);
+			}
+		});
+		foot.append(cancel, del);
+		box.append(foot);
+	});
+}
+
+// ---------------------------------------------------------------- live voice
+
+function onLiveFrame(frame) {
+	if (frame.type === "live_phase") {
+		state.live.phase = frame.phase ?? "";
+		if (frame.phase === "error") toast("live session error", "error");
+	} else if (frame.type === "live_levels") {
+		state.live.input = Number(frame.input ?? 0);
+		state.live.output = Number(frame.output ?? 0);
+	} else if (frame.type === "live_transcript") {
+		state.live.turns.set(`${frame.role}:${frame.turn ?? 0}`, frame);
+	} else if (frame.type === "live_end") {
+		state.live.active = false;
+		state.live.phase = "ended";
+		state.live.input = 0;
+		state.live.output = 0;
+		if (frame.error) toast(`live ended: ${frame.error}`, "error");
+	}
+	renderLive();
+}
+
+function renderLive() {
+	const active = state.live.active || state.live.phase === "listening" || state.live.phase === "working" || state.live.phase === "speaking";
+	$("liveBtn").className = `chip ${active ? "active" : ""}`;
+	$("liveBtn").textContent = active ? `live:${state.live.phase || "on"}` : "live";
+	const card = $("liveCard");
+	card.classList.toggle("hidden", !active && state.live.turns.size === 0);
+	const body = $("liveBody");
+	body.replaceChildren();
+	const bar = (label, value) => {
+		const row = el("div", "liveRow");
+		row.append(el("span", "lbl", label));
+		const track = el("div", "liveBar");
+		const fill = el("i");
+		fill.style.width = `${Math.max(0, Math.min(1, value)) * 100}%`;
+		track.append(fill);
+		row.append(track);
+		return row;
+	};
+	body.append(bar("mic", state.live.input), bar("out", state.live.output));
+	for (const turn of [...state.live.turns.values()].slice(-12)) {
+		const node = el("div", `liveTurn ${turn.role}`);
+		node.append(el("div", "who", `${turn.role}${turn.final ? "" : " …"}`));
+		node.append(el("div", null, turn.text ?? ""));
+		body.append(node);
+	}
+}
+
+async function toggleLive() {
+	const active = state.live.active || state.live.phase === "listening";
+	if (active) {
+		try {
+			await cmd({ type: "live_stop" });
+		} catch (err) {
+			notify(`live stop failed: ${err.message ?? err}`);
+		}
+		state.live.active = false;
+		renderLive();
+		return;
+	}
+	state.live.active = true;
+	state.live.phase = "connecting";
+	state.live.turns.clear();
+	renderLive();
+	try {
+		const frame = await cmd({ type: "live_start" }, 180000);
+		if (frame?.success === false) throw new Error(frame.error ?? "live_start failed");
+		toast(`live session started (voice ${frame?.data?.voice ?? "default"}); audio runs on the omp host`, "info");
+	} catch (err) {
+		state.live.active = false;
+		state.live.phase = "";
+		renderLive();
+		notify(`live start failed: ${err.message ?? err}`);
+	}
+}
+
 // ---------------------------------------------------------------- data refresh
 
 async function refreshState() {
@@ -817,6 +1062,7 @@ async function refreshState() {
 		renderQueue();
 		renderGoal();
 		renderWidgets();
+		renderChats();
 	} catch (err) {
 		notify(`state refresh failed: ${err.message ?? err}`);
 	}
@@ -852,6 +1098,7 @@ async function bootstrap() {
 		refreshState(),
 		refreshTranscript(),
 		refreshSubagents(),
+		loadChats(),
 		must({ type: "get_available_commands" })
 			.then((d) => {
 				state.commands = d?.commands ?? [];
@@ -1007,22 +1254,10 @@ function showSessions() {
 			body.replaceChildren(items.length ? modalList(items, pick) : el("div", "dim", "no sessions in this folder"));
 		};
 		const pick = async (item) => {
-			try {
-				await must({ type: "switch_session", sessionPath: item.value.path });
-				closeModal();
-				await bootstrap();
-			} catch (err) {
-				notify(String(err.message ?? err));
-			}
+			await switchChat(item.value.path);
 		};
 		newBtn.addEventListener("click", async () => {
-			try {
-				await must({ type: "new_session" });
-				closeModal();
-				await bootstrap();
-			} catch (err) {
-				notify(String(err.message ?? err));
-			}
+			await newChat();
 		});
 		refreshBtn.addEventListener("click", () => void load());
 		await load();
@@ -1405,9 +1640,22 @@ document.addEventListener("keydown", (ev) => {
 });
 
 $("sendBtn").addEventListener("click", () => void submit());
+$("newChatBtn").addEventListener("click", () => void newChat());
+$("refreshChatsBtn").addEventListener("click", () => void loadChats());
+$("chatSearch").addEventListener("input", () => renderChats());
 $("stopBtn").addEventListener("click", () => void abort());
 $("commandsBtn").addEventListener("click", () => showCommands());
 $("btwBtn").addEventListener("click", () => showBtw());
+$("liveBtn").addEventListener("click", () => void toggleLive());
+$("liveMuteBtn").addEventListener("click", async () => {
+	try {
+		const frame = await cmd({ type: "live_mute" });
+		if (frame?.success === false) throw new Error(frame.error);
+		toast(`microphone ${frame?.data?.muted ? "muted" : "unmuted"}`, "info");
+	} catch (err) {
+		notify(`live mute failed: ${err.message ?? err}`);
+	}
+});
 $("modelBtn").addEventListener("click", () => showModels());
 $("thinkingBtn").addEventListener("click", () => showThinking());
 $("sessionBtn").addEventListener("click", () => showSessions());
