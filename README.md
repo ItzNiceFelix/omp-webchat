@@ -112,6 +112,7 @@ scratch artifacts that survive the session.
 - **One child process per server, shared by every open tab.** Each tab's commands carry a `clientId:seq` id; the server routes each response back to the tab that asked, and broadcasts events to all tabs — so two tabs see the same chat and both can prompt. Start a second server on another port for a second independent session.
 - Protocol v2 (`rpc_chunk`) framing is reassembled, so oversized frames (large transcripts, big tool results) survive intact.
 - Cards pushed by `webchat_card` are UI-only: they are not part of the durable transcript and disappear on reload.
+- **Some omp built-ins are interactive-TUI only** (`/vibe`, `/theme`, `/status`, `/help`, `/hotkeys`, …). The runtime does not dispatch them over RPC and does not list them in `available_commands` (93 advertised here vs. the full TUI set); an unknown spelling falls through to the model as ordinary prompt text. The composer refuses to send an unrecognized `/command`, writes the reason into the transcript, and offers "send as message" instead — so this can never happen silently. Use the commands modal to see exactly what this session will dispatch.
 - `predict_word` ghost text is intentionally not implemented.
 - `--approval-mode=always-ask` (forwarded via `--`) turns every tool call into a browser approval dialog if you want that gate.
 

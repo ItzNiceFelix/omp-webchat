@@ -1210,6 +1210,13 @@ function showThinking() {
 
 function showCommands(prefill) {
 	openModal("commands", (box) => {
+		box.append(
+			el(
+				"div",
+				"pre",
+				`Every command this session advertises (${state.commands.length}). Interactive-TUI-only built-ins such as /vibe are not dispatched over RPC and are not listed here.`,
+			),
+		);
 		const paint = (holder, filter) => {
 			holder.replaceChildren(
 				modalList(
@@ -1514,10 +1521,60 @@ function addFiles(files) {
 	}
 }
 
-async function submit() {
+/** The runtime advertises every command it can actually dispatch; anything else falls through as prose. */
+function unknownCommand(text) {
+	if (state.commands.length === 0) return null;
+	const match = /^\/([^\s/]+)/.exec(text);
+	if (!match) return null;
+	const name = match[1];
+	const known = state.commands.some((c) => c.name === name || (c.aliases ?? []).includes(name));
+	return known ? null : name;
+}
+
+function promptUnknownCommand(text, name) {
+	openModal(`/${name} is not a command here`, (box) => {
+		box.append(
+			el(
+				"div",
+				"pre",
+				`This session advertises ${state.commands.length} commands and /${name} is not one of them.\n\n` +
+					"Some omp built-ins are interactive-TUI only (for example /vibe, /theme, /hotkeys). The runtime does not conceal " +
+					"them from RPC — an unknown spelling falls through as ordinary prompt text, which the model then reads as a message.",
+			),
+		);
+		const foot = el("div", "foot");
+		const cancel = el("button", "ghost", "cancel");
+		const send = el("button", "primary", "send as message");
+		cancel.addEventListener("click", () => {
+			closeModal();
+			$("input").focus();
+		});
+		send.addEventListener("click", () => {
+			closeModal();
+			void submit(true);
+		});
+		foot.append(cancel, send);
+		box.append(foot);
+	});
+}
+
+async function submit(skipCommandCheck = false) {
 	const input = $("input");
 	const text = input.value.trim();
 	if (!text && !state.images.length) return;
+	if (!skipCommandCheck) {
+		if (state.commands.length === 0) {
+			// A prompt typed before bootstrap finished must still be checked against the real list.
+			const data = await must({ type: "get_available_commands" }).catch(() => null);
+			if (data?.commands) state.commands = data.commands;
+		}
+		const unknown = unknownCommand(text);
+		if (unknown) {
+			appendSystemRow(`/${unknown} is not an available command in this session (TUI-only commands are not dispatched over RPC)`, "system");
+			promptUnknownCommand(text, unknown);
+			return;
+		}
+	}
 	const images = state.images.length ? [...state.images] : undefined;
 	const command = { type: "prompt", message: text };
 	if (images) command.images = images;
