@@ -10,6 +10,7 @@
  * Upgrade path: a process pool keyed by session dir, if multi-session tabs are ever needed.
  */
 import type { ServerWebSocket } from "bun";
+import { existsSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -19,7 +20,7 @@ type Frame = Record<string, unknown> & { type?: unknown; id?: unknown };
 type Socket = ServerWebSocket<{ id: string }>;
 
 const argv = Bun.argv.slice(2);
-const BOOL_FLAGS: Record<string, true> = { open: true, selftest: true };
+const BOOL_FLAGS: Record<string, true> = { open: true, selftest: true, "no-defaults": true };
 const VALUE_FLAGS: Record<string, true> = { cwd: true, port: true, host: true, omp: true };
 const opts: Record<string, string | true> = {};
 const ompArgs: string[] = [];
@@ -48,6 +49,8 @@ const PORT = Number(opts.port ?? Bun.env.OMP_WEBCHAT_PORT ?? 7788);
 const HOST = String(opts.host ?? "127.0.0.1");
 const OMP_BIN = String(opts.omp ?? Bun.which("omp") ?? "omp");
 const PUBLIC_DIR = join(import.meta.dir, "public");
+/** Settings overlay applied to the child unless the caller brings their own --config. */
+const DEFAULT_CONFIG = join(import.meta.dir, "defaults.yml");
 const SESSIONS_ROOT = join(Bun.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".omp", "agent"), "sessions");
 /** Scratch root for `webchat://` reads/writes: plugin-owned, outside node_modules. */
 const DATA_DIR = join(Bun.env.PI_CONFIG_DIR ?? join(homedir(), ".omp"), "plugins", "data", "omp-webchat");
@@ -193,7 +196,10 @@ function spawnOmp() {
 	if (shuttingDown || child) return;
 	// rpc-ui = extension UI *and* tool UI: tool dialogs, approvals, and the `ask` tool are
 	// mounted only in this mode (`--mode rpc` mounts 11 tools, `rpc-ui` mounts ask as well).
-	const cmd = [OMP_BIN, "--mode", "rpc-ui", ...ompArgs];
+	const extra: string[] = [];
+	const hasConfig = ompArgs.some((a) => a === "--config" || a.startsWith("--config="));
+	if (!opts["no-defaults"] && !hasConfig && existsSync(DEFAULT_CONFIG)) extra.push("--config", DEFAULT_CONFIG);
+	const cmd = [OMP_BIN, "--mode", "rpc-ui", ...extra, ...ompArgs];
 	// This server may itself run under `BUN_BE_BUN=1 omp`; the child must be a real omp, not bun.
 	const env = { ...Bun.env };
 	delete env.BUN_BE_BUN;

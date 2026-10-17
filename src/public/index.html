@@ -2,94 +2,206 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="color-scheme" content="dark" />
+		<meta name="theme-color" content="#0f172a" />
 		<title>omp webchat</title>
+		<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f172a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='none' stroke='%2322c55e' stroke-width='3'/%3E%3C/svg%3E" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+		/>
 		<link rel="stylesheet" href="/app.css?v=__V__" />
 	</head>
 	<body>
-		<header id="hdr">
-			<div class="brand"><span class="dot" id="conn"></span> omp<span class="dim">webchat</span></div>
-			<button class="chip" id="sessionBtn" title="Sessions">session</button>
-			<button class="chip" id="modelBtn" title="Model">model</button>
-			<button class="chip" id="thinkingBtn" title="Thinking level">thinking</button>
-			<button class="chip" id="fastBtn" title="Fast mode">fast</button>
-			<button class="chip" id="slowBtn" title="Slow mode">slow</button>
-			<button class="chip" id="compactBtn" title="Auto compaction">compact</button>
-			<button class="chip" id="warmingBtn" title="Cache warming">warm</button>
-			<span class="spacer"></span>
-			<span class="meta" id="ctx">–</span>
-			<span class="meta" id="tps"></span>
-			<button class="chip" id="commandsBtn">commands</button>
-			<button class="chip" id="btwBtn" title="Side question">/btw</button>
-			<button class="chip" id="liveBtn" title="Live voice session (mic/speakers run on the omp host)">live</button>
-			<button class="chip danger" id="stopBtn" title="Abort (Esc)">stop</button>
-		</header>
-		<aside id="side">
-			<section id="chatsCard" class="card">
-				<h3>
-					chats
-					<span class="spacer"></span>
-					<button class="mini" id="newChatBtn" title="New chat">＋</button>
-					<button class="mini" id="refreshChatsBtn" title="Refresh">⟳</button>
-				</h3>
-				<input type="text" id="chatSearch" placeholder="search chats…" />
-				<div id="chatList"></div>
-			</section>
-			<section id="statusCard" class="card">
-				<h3>session</h3>
-				<div class="kv" id="sessionMeta"></div>
-				<div class="statusline" id="statusLine"></div>
-			</section>
-			<section id="todoCard" class="card hidden">
-				<h3>todos</h3>
-				<div id="todoBody"></div>
-			</section>
-			<section id="queueCard" class="card hidden">
-				<h3>queued</h3>
-				<div id="queueBody"></div>
-			</section>
-			<section id="agentsCard" class="card hidden">
-				<h3>agents <span class="dim" id="agentCount"></span></h3>
-				<div id="agentsBody"></div>
-			</section>
-			<section id="goalCard" class="card hidden">
-				<h3>goal</h3>
-				<div id="goalBody"></div>
-			</section>
-			<section id="liveCard" class="card hidden">
-				<h3>
-					live
-					<span class="spacer"></span>
-					<button class="mini" id="liveMuteBtn" title="Toggle microphone mute">mute</button>
-				</h3>
-				<div id="liveBody"></div>
-			</section>
-			<section id="widgetCard" class="card hidden">
-				<h3>widgets</h3>
-				<div id="widgetBody"></div>
-			</section>
-		</aside>
-		<main id="main">
-			<div id="transcript"></div>
-			<div id="composer">
-				<div id="attachments"></div>
-				<div class="row">
-					<textarea id="input" rows="1" placeholder="Message omp…  (/ for commands, Enter sends, Esc aborts)"></textarea>
-					<div class="col">
-						<button id="sendBtn" class="primary">send</button>
-						<button id="attachBtn" class="ghost" title="Attach image">img</button>
+		<svg class="sprite" aria-hidden="true" focusable="false">
+			<defs>
+				<symbol id="i-send" viewBox="0 0 24 24"><path d="M4.5 12 20 4.5 12.5 20 11 13.5z" /></symbol>
+				<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" /></symbol>
+				<symbol id="i-paperclip" viewBox="0 0 24 24"><path d="M20 11.5 12.4 19a4.5 4.5 0 0 1-6.4-6.4l8-8a3 3 0 0 1 4.3 4.3l-8 8a1.5 1.5 0 0 1-2.2-2.2l7.3-7.3" /></symbol>
+				<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></symbol>
+				<symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M9 9v2a3 3 0 0 0 4.6 2.5M15 10V6a3 3 0 0 0-5.6-1.5M5.5 11.5a6.5 6.5 0 0 0 10.2 5.3M12 18v3M4 4l16 16" /></symbol>
+				<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 13 6.5 9ZM10 18a2 2 0 0 0 4 0" /></symbol>
+				<symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M8.6 5.6A5.5 5.5 0 0 1 17.5 9c0 2 .4 3.3.8 4.2M5.5 12.6C5.5 9.6 6.5 8 6.5 8M5 14.5h14M10 18a2 2 0 0 0 4 0M4 4l16 16" /></symbol>
+				<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+				<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></symbol>
+				<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></symbol>
+				<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16z" /></symbol>
+				<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6" /></symbol>
+				<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16" /><circle cx="9" cy="8" r="2" /><circle cx="15" cy="16" r="2" /></symbol>
+				<symbol id="i-chip" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></symbol>
+				<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M5 18a8 8 0 1 1 14 0" /><path d="M12 14.5 16 9" /></symbol>
+				<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 19a5.5 5.5 0 0 0-2-4.3" /></symbol>
+				<symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></symbol>
+				<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></symbol>
+				<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
+				<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l8.5 15h-17zM12 10v4M12 17h.01" /></symbol>
+				<symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 4l1.8 4.7L18.5 10l-4.7 1.8L12 16.5l-1.8-4.7L5.5 10l4.7-1.3zM18 16l.9 2.1L21 19l-2.1.9L18 22l-.9-2.1L15 19l2.1-.9z" /></symbol>
+				<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></symbol>
+				<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 5H6a1 1 0 0 0-1 1v9" /></symbol>
+				<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4" /></symbol>
+				<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></symbol>
+			</defs>
+		</svg>
+
+		<div id="app">
+			<header id="hdr">
+				<button class="icon-btn only-mobile" id="sidebarToggle" aria-label="Open chats" aria-expanded="false">
+					<svg class="ic" aria-hidden="true"><use href="#i-menu" /></svg>
+				</button>
+				<div class="brand">
+					<span class="dot" id="conn" role="img" aria-label="connection status"></span>
+					<span class="brand-name">omp<span class="dim">webchat</span></span>
+				</div>
+				<button class="chip" id="sessionBtn" title="Session / chats">
+					<svg class="ic" aria-hidden="true"><use href="#i-refresh" /></svg>
+					<span id="sessionLabel">session</span>
+				</button>
+				<span class="spacer"></span>
+				<span class="meta" id="ctx" title="context window usage">–</span>
+				<span class="meta" id="tps" title="output throughput"></span>
+				<button class="chip" id="agentsBtn" title="Agents" aria-expanded="false">
+					<svg class="ic" aria-hidden="true"><use href="#i-users" /></svg>
+					<span id="agentsCount" role="status" aria-atomic="true">0 agents</span>
+				</button>
+				<button class="icon-btn" id="bellBtn" aria-label="Desktop notifications: off" aria-pressed="false" title="Desktop notifications">
+					<svg class="ic" aria-hidden="true"><use href="#i-bell-off" /></svg>
+				</button>
+				<button class="icon-btn" id="moreBtn" aria-label="More controls" aria-expanded="false" title="More controls">
+					<svg class="ic" aria-hidden="true"><use href="#i-sliders" /></svg>
+				</button>
+			</header>
+
+			<aside id="side" aria-label="Chats and session">
+				<section id="chatsCard" class="card">
+					<h3>
+						chats
+						<span class="spacer"></span>
+						<button class="icon-btn sm" id="newChatBtn" aria-label="New chat" title="New chat"><svg class="ic" aria-hidden="true"><use href="#i-plus" /></svg></button>
+						<button class="icon-btn sm" id="refreshChatsBtn" aria-label="Refresh chats" title="Refresh"><svg class="ic" aria-hidden="true"><use href="#i-refresh" /></svg></button>
+					</h3>
+					<div class="field">
+						<svg class="ic" aria-hidden="true"><use href="#i-search" /></svg>
+						<input type="text" id="chatSearch" placeholder="search chats…" aria-label="Search chats" />
 					</div>
+					<div id="chatList"></div>
+				</section>
+
+				<section id="statusCard" class="card">
+					<h3>session</h3>
+					<div class="kv" id="sessionMeta"></div>
+					<div class="statusline" id="statusLine" role="status"></div>
+				</section>
+
+				<section id="todoCard" class="card hidden">
+					<h3>todos <span class="spacer"></span><span class="count" id="todoCount" role="status" aria-atomic="true"></span></h3>
+					<div id="todoBody"></div>
+				</section>
+
+				<section id="queueCard" class="card hidden">
+					<h3>queued <span class="spacer"></span><span class="count" id="queueCount" role="status" aria-atomic="true"></span></h3>
+					<div id="queueBody"></div>
+				</section>
+
+				<section id="goalCard" class="card hidden">
+					<h3>goal</h3>
+					<div id="goalBody"></div>
+				</section>
+
+				<section id="liveCard" class="card hidden">
+					<h3>
+						live voice
+						<span class="spacer"></span>
+						<button class="icon-btn sm" id="liveMuteBtn" aria-label="Toggle microphone mute" title="Mute"><svg class="ic" aria-hidden="true"><use href="#i-mic" /></svg></button>
+					</h3>
+					<div id="liveBody"></div>
+				</section>
+
+				<section id="widgetCard" class="card hidden">
+					<h3>widgets</h3>
+					<div id="widgetBody"></div>
+				</section>
+			</aside>
+
+			<main id="main">
+				<div id="busyBar" aria-hidden="true"><i></i></div>
+				<div class="chat-scroll" id="scroll">
+					<div id="transcript" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation"></div>
 				</div>
-				<div class="row small">
-					<label><input type="checkbox" id="steerBox" checked /> steer while busy</label>
-					<span class="dim" id="hint"></span>
+				<div id="composer">
+					<div id="attachments"></div>
+					<div class="composer-box">
+						<textarea id="input" rows="1" placeholder="Message omp…   / commands   Shift+Enter newline" aria-label="Message"></textarea>
+						<div class="composer-tools">
+							<button class="icon-btn sm" id="attachBtn" aria-label="Attach image" title="Attach image"><svg class="ic" aria-hidden="true"><use href="#i-paperclip" /></svg></button>
+							<button class="icon-btn sm" id="liveBtn" aria-label="Live voice session" title="Live voice (mic/speakers on the omp host)" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-mic" /></svg></button>
+							<button class="chip ghost sm" id="modelBtn" title="Model"><svg class="ic" aria-hidden="true"><use href="#i-chip" /></svg><span id="modelLabel">model</span></button>
+							<button class="chip ghost sm" id="thinkingBtn" title="Reasoning effort"><svg class="ic" aria-hidden="true"><use href="#i-gauge" /></svg><span id="thinkingLabel">effort</span></button>
+							<button class="chip ghost sm" id="commandsBtn" title="Commands"><svg class="ic" aria-hidden="true"><use href="#i-terminal" /></svg><span>/</span></button>
+							<span class="spacer"></span>
+							<label class="toggle" title="When busy: steer the current turn instead of queueing"><input type="checkbox" id="steerBox" checked /><span>steer</span></label>
+							<button class="icon-btn" id="stopBtn" aria-label="Stop (Esc)" title="Stop (Esc)" disabled><svg class="ic" aria-hidden="true"><use href="#i-stop" /></svg></button>
+							<button class="icon-btn primary" id="sendBtn" aria-label="Send message" title="Send (Enter)"><svg class="ic" aria-hidden="true"><use href="#i-send" /></svg></button>
+						</div>
+					</div>
+					<div class="composer-hint"><span class="dim" id="hint"></span></div>
+					<div id="palette" class="hidden" role="listbox" aria-label="Command suggestions"></div>
+					<input type="file" id="fileInput" accept="image/*" multiple hidden />
 				</div>
-				<div id="palette" class="hidden"></div>
-				<input type="file" id="fileInput" accept="image/*" multiple hidden />
+			</main>
+
+			<aside id="agentsDrawer" aria-label="Agents" aria-hidden="true">
+				<div class="drawer-head">
+					<svg class="ic" aria-hidden="true"><use href="#i-users" /></svg>
+					<h3>agents</h3>
+					<span class="spacer"></span>
+					<button class="icon-btn sm" id="agentsRefreshBtn" aria-label="Refresh agents" title="Refresh"><svg class="ic" aria-hidden="true"><use href="#i-refresh" /></svg></button>
+					<button class="icon-btn sm" id="agentsCloseBtn" aria-label="Close agents panel" title="Close"><svg class="ic" aria-hidden="true"><use href="#i-x" /></svg></button>
+				</div>
+				<div id="agentsBody" class="drawer-body"></div>
+				<div id="agentTranscript" class="drawer-foot hidden">
+					<div class="drawer-sub">
+						<span id="agentTranscriptTitle" class="dim">transcript</span>
+						<span class="spacer"></span>
+						<button class="icon-btn sm" id="agentTailBtn" aria-label="Toggle live tail" title="Live tail" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-sparkle" /></svg></button>
+						<button class="icon-btn sm" id="agentTranscriptClose" aria-label="Close transcript" title="Close"><svg class="ic" aria-hidden="true"><use href="#i-x" /></svg></button>
+					</div>
+					<pre id="agentTranscriptBody"></pre>
+				</div>
+			</aside>
+
+			<div id="backdrop" hidden></div>
+
+			<div id="moreMenu" class="popover hidden" role="menu" aria-label="Session controls">
+				<button class="menu-row" id="fastBtn" role="menuitemcheckbox" aria-checked="false">
+					<svg class="ic" aria-hidden="true"><use href="#i-sparkle" /></svg><span class="lbl">fast mode</span><span class="state">off</span>
+				</button>
+				<button class="menu-row" id="slowBtn" role="menuitemcheckbox" aria-checked="false">
+					<svg class="ic" aria-hidden="true"><use href="#i-gauge" /></svg><span class="lbl">slow mode</span><span class="state">off</span>
+				</button>
+				<button class="menu-row" id="compactBtn" role="menuitemcheckbox" aria-checked="true">
+					<svg class="ic" aria-hidden="true"><use href="#i-panel" /></svg><span class="lbl">auto compaction</span><span class="state">on</span>
+				</button>
+				<button class="menu-row" id="warmingBtn" role="menuitem" data-mode="off">
+					<svg class="ic" aria-hidden="true"><use href="#i-sparkle" /></svg><span class="lbl">cache warming</span><span class="state">off</span>
+				</button>
+				<button class="menu-row" id="btwBtn" role="menuitem">
+					<svg class="ic" aria-hidden="true"><use href="#i-copy" /></svg><span class="lbl">side question /btw</span>
+				</button>
+				<button class="menu-row" id="exportBtn" role="menuitem">
+					<svg class="ic" aria-hidden="true"><use href="#i-copy" /></svg><span class="lbl">export transcript</span>
+				</button>
+				<button class="menu-row" id="restartBtn" role="menuitem">
+					<svg class="ic" aria-hidden="true"><use href="#i-refresh" /></svg><span class="lbl">restart omp process</span>
+				</button>
 			</div>
-		</main>
-		<div id="toasts"></div>
-		<div id="modalWrap" class="hidden"><div id="modal"></div></div>
+		</div>
+
+		<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+		<div id="popover" class="popover hidden" role="dialog" aria-label="Picker"></div>
+		<div id="modalWrap" class="hidden"><div id="modal" role="dialog" aria-modal="true"></div></div>
 		<script src="/app.js?v=__V__" type="module"></script>
 	</body>
 </html>

@@ -25,16 +25,62 @@ const state = {
 	images: [],
 	btw: new Map(),
 	lastSentText: "",
+	notify: { enabled: false, permission: "default", sound: true },
+	drawer: { open: false, selected: null, tail: true, byte: 0, file: null, timer: null },
+	welcomeDismissed: false,
 };
 
 // ---------------------------------------------------------------- helpers
 
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
 
+/** Inline SVG from the sprite; decorative by default. */
+function icon(name, cls = "ic", label) {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("class", cls);
+	if (label) {
+		svg.setAttribute("role", "img");
+		svg.setAttribute("aria-label", label);
+	} else {
+		svg.setAttribute("aria-hidden", "true");
+	}
+	const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+	use.setAttribute("href", `#i-${name}`);
+	svg.append(use);
+	return svg;
+}
+
+const KEYWORDS =
+	/\b(const|let|var|function|return|if|else|for|while|await|async|import|from|export|class|new|try|catch|throw|type|interface|extends|implements|public|private|readonly|def|end|do|then|fi|esac|in|of|not|null|true|false|None|True|False)\b/g;
+
+/** Small language-agnostic highlighter: comments, strings, numbers, keywords, calls. */
+function highlightCode(code) {
+	return code
+		.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/g, (m) => `\u0000c${m}\u0000`)
+		.replace(/('[^'\n]*'|"[^"\n]*"|`[^`]*`)/g, (m) => `\u0000s${m}\u0000`)
+		.replace(/\b(\d+(?:\.\d+)?)\b/g, "\u0000n$1\u0000")
+		.replace(KEYWORDS, "\u0000k$1\u0000")
+		.replace(/\b([A-Za-z_$][\w$]*)(?=\()/g, "\u0000f$1\u0000")
+		.replace(/\u0000([csknf])([\s\S]*?)\u0000/g, (_m, kind, text) => {
+			const cls = { c: "tok-com", s: "tok-str", k: "tok-key", n: "tok-num", f: "tok-fn" }[kind];
+			return `<span class="${cls}">${text}</span>`;
+		});
+}
+
+/** Colored inline spans: code, commands, mentions, paths, links. */
 function inline(s) {
 	return s
-		.replace(/`([^`]+)`/g, "<code>$1</code>")
+		.replace(/`([^`]+)`/g, '<code>$1</code>')
 		.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+		.replace(
+			/(^|[\s([])(\/(?:[a-z][\w-]*(?::[\w-]+)?))(?=[\s.,)\]]|$)/g,
+			'$1<span class="slashref">$2</span>',
+		)
+		.replace(/(^|[\s(])(@[\w./-]+)/g, '$1<span class="mention">$2</span>')
+		.replace(
+			/(^|[\s([])((?:\.{0,2}[\\/])?[\w.@-]+(?:[\\/][\w.@-]+)+\.\w{1,6})(?=[\s.,)\]]|$)/g,
+			'$1<span class="path">$2</span>',
+		)
 		.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
 }
 
@@ -47,7 +93,7 @@ function md(src) {
 				const nl = part.indexOf("\n");
 				const lang = nl >= 0 ? part.slice(0, nl).trim() : "";
 				const code = (nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, "");
-				return `<pre class="code"${lang ? ` data-lang="${lang}"` : ""}><code>${code}</code></pre>`;
+				return `<pre class="code"${lang ? ` data-lang="${lang}"` : ""}><code>${highlightCode(code)}</code></pre>`;
 			}
 			return part
 				.split(/\n{2,}/)
@@ -255,6 +301,11 @@ function onRpcFrame(frame) {
 			if (state.messages.length < 2 || expected > state.messages.length) void refreshTranscript();
 			void refreshState();
 			void loadChats();
+			if (frame.yielded !== false) {
+				const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+				ping("done", "omp finished", contentText(last?.content).replace(/\s+/g, " ").slice(0, 160) || "the turn completed");
+			}
+			renderWelcome();
 			return;
 		}
 		case "session_settled":
@@ -324,7 +375,10 @@ function onRpcFrame(frame) {
 		case "prompt_result":
 			state.busy = false;
 			renderHeader();
-			if (frame.status === "error") notify(`turn error: ${frame.error?.message ?? "unknown"}`, "error");
+			if (frame.status === "error") {
+				notify(`turn error: ${frame.error?.message ?? "unknown"}`, "error");
+				ping("error", "omp turn failed", frame.error?.message ?? "unknown error");
+			}
 			return;
 		case "irc_message":
 			appendSystemRow(`[irc] ${frame.text ?? JSON.stringify(frame)}`, "system");
@@ -413,6 +467,7 @@ function onMessageUpdate(frame) {
 		node.innerHTML = md(block.text ?? "");
 	} else if (block.type === "thinking") {
 		node.querySelector(".body").textContent = block.thinking ?? "";
+		node.classList.add("streaming");
 	} else if (block.type === "toolCall") {
 		const partial = block.partialArgs ?? (block.arguments ? JSON.stringify(block.arguments, null, 2) : "");
 		if (partial) node.querySelector(".args").textContent = partial;
@@ -435,6 +490,7 @@ function onMessageEnd(frame) {
 	const blocks = node.querySelector(".blocks");
 	blocks.replaceChildren();
 	blocksToNodes(msg.content, blocks);
+	for (const det of node.querySelectorAll("details.streaming")) det.classList.remove("streaming");
 	applyUsage(node, msg);
 	cur = null;
 	scrollDown();
@@ -486,8 +542,13 @@ function transcript() {
 }
 
 function scrollDown() {
-	const box = transcript();
+	const box = $("scroll");
 	box.scrollTop = box.scrollHeight;
+}
+
+function atBottom() {
+	const box = $("scroll");
+	return box.scrollHeight - box.scrollTop - box.clientHeight < 120;
 }
 
 function clearTranscript() {
@@ -512,15 +573,17 @@ function renderTranscript() {
 		}
 	}
 	for (const result of toolResults.values()) applyToolResult(result);
+	renderWelcome();
 	scrollDown();
 }
 
 function userBubble(msg) {
 	const node = el("div", "msg user");
-	node.append(el("div", "who", "you"));
+	const bubble = el("div", "bubble");
 	const body = el("div", "blocks");
 	blocksToNodes(msg.content, body);
-	node.append(body);
+	bubble.append(body);
+	node.append(bubble);
 	return node;
 }
 
@@ -564,10 +627,11 @@ function appendCard(title, body) {
 }
 
 function pushOptimistic(text) {
-	const node = el("div", "msg user dim");
-	node.dataset.optimistic = text;
-	node.append(el("div", "who", "you"));
-	node.append(el("div", "blocks", text));
+	const node = el("div", "msg user");
+	const bubble = el("div", "bubble dim");
+	bubble.dataset.optimistic = text;
+	bubble.append(el("div", "blocks", text));
+	node.append(bubble);
 	transcript().append(node);
 	scrollDown();
 }
@@ -575,7 +639,7 @@ function pushOptimistic(text) {
 function dropOptimistic(msg) {
 	const text = contentText(msg.content);
 	for (const node of transcript().querySelectorAll("[data-optimistic]")) {
-		if (node.dataset.optimistic === text) node.remove();
+		if (node.dataset.optimistic === text) node.closest(".msg")?.remove();
 	}
 }
 
@@ -622,15 +686,20 @@ function renderAgentSlot(callId) {
 function updateCard(card, callId, resultMsg, args) {
 	const entry = state.tools.get(callId) ?? {};
 	const status = card.querySelector(".status");
-	status.className = `status pill ${entry.status === "running" ? "running" : entry.isError ? "error" : entry.status ? "ok" : ""}`;
-	status.textContent =
-		entry.status === "running"
-			? `running${entry.start ? ` ${timeAgo(entry.start)}` : ""}`
-			: entry.status === "error"
-				? "failed"
-				: entry.status === "ok"
-					? "ok"
-					: "queued";
+	const running = entry.status === "running";
+	card.classList.toggle("running", running);
+	const head = card.querySelector(".head");
+	const existing = head.querySelector(".spin");
+	if (running && !existing) head.prepend(el("span", "spin"));
+	if (!running && existing) existing.remove();
+	status.className = `status pill ${running ? "running" : entry.isError ? "error" : entry.status ? "ok" : ""}`;
+	status.textContent = running
+		? `running${entry.start ? ` ${timeAgo(entry.start)}` : ""}`
+		: entry.status === "error"
+			? "failed"
+			: entry.status === "ok"
+				? "ok"
+				: "queued";
 	if (args) card.querySelector(".args").textContent = JSON.stringify(args, null, 2);
 	const res = card.querySelector(".res");
 	const blocks = resultMsg?.content;
@@ -656,17 +725,32 @@ function updateCard(card, callId, resultMsg, args) {
 
 function renderHeader() {
 	const s = state.session ?? {};
-	$("sessionBtn").textContent = s.sessionName ? s.sessionName.slice(0, 24) : "session";
-	$("modelBtn").textContent = s.model?.id ? String(s.model.id).slice(0, 30) : "model";
-	$("thinkingBtn").textContent = `think:${s.thinkingLevel ?? "?"}`;
-	$("fastBtn").className = `chip ${s.fastModeActive ? "active" : ""}`;
-	$("slowBtn").className = `chip ${s.slowModeEnabled && s.slowModeSupported ? "active" : ""}`;
-	$("compactBtn").className = `chip ${s.autoCompactionEnabled ? "active" : ""}`;
-	$("ctx").textContent = s.contextUsage ? `ctx ${s.contextUsage.percent?.toFixed?.(1) ?? "?"}% (${s.contextUsage.tokens}/${s.contextUsage.contextWindow})` : "ctx –";
+	$("sessionLabel").textContent = s.sessionName ? s.sessionName.slice(0, 28) : "session";
+	$("modelLabel").textContent = s.model?.id ? String(s.model.id).slice(0, 30) : "model";
+	$("thinkingLabel").textContent = `effort:${s.thinkingLevel ?? "auto"}`;
+	const menu = [
+		["fastBtn", Boolean(s.fastModeActive)],
+		["slowBtn", Boolean(s.slowModeSupported && s.slowModeEnabled)],
+		["compactBtn", Boolean(s.autoCompactionEnabled)],
+	];
+	for (const [id, on] of menu) {
+		const node = $(id);
+		node.setAttribute("aria-checked", String(on));
+		node.querySelector(".state").textContent = on ? "on" : "off";
+	}
+	$("warmingBtn").querySelector(".state").textContent = $("warmingBtn").dataset.mode ?? "off";
+	$("ctx").textContent = s.contextUsage
+		? `ctx ${s.contextUsage.percent?.toFixed?.(1) ?? "?"}% · ${s.contextUsage.tokens}/${s.contextUsage.contextWindow}`
+		: "ctx –";
 	$("tps").textContent = s.tokensPerSecond ? `${Number(s.tokensPerSecond).toFixed(1)} tok/s` : "";
 	$("stopBtn").disabled = !state.busy;
-	$("sendBtn").textContent = state.busy ? ($("steerBox").checked ? "steer" : "queue") : "send";
-	$("hint").textContent = state.busy ? "agent busy" : s.isSettled === false ? "background work pending" : "";
+	$("main").classList.toggle("busy", state.busy);
+	$("sendBtn").setAttribute("aria-label", state.busy && $("steerBox").checked ? "Steer the running turn" : state.busy ? "Queue message" : "Send message");
+	$("hint").textContent = state.busy
+		? `${$("steerBox").checked ? "steering" : "queueing"} · Esc to stop`
+		: s.isSettled === false
+			? "background work pending"
+			: "";
 	const meta = $("sessionMeta");
 	meta.replaceChildren();
 	const rows = [
@@ -674,10 +758,14 @@ function renderHeader() {
 		["session", s.sessionFile ? s.sessionFile.split(/[\\/]/).pop() : "–"],
 		["messages", String(s.messageCount ?? state.messages.length)],
 		["model", s.model?.id ?? "–"],
-		["thinking", `${s.thinkingLevel ?? "?"}${s.fastModeActive ? " · fast" : ""}${s.slowModeSupported && s.slowModeEnabled ? " · slow" : ""}`],
+		["effort", `${s.thinkingLevel ?? "?"}${s.fastModeActive ? " · fast" : ""}${s.slowModeSupported && s.slowModeEnabled ? " · slow" : ""}`],
 	];
 	if (state.stats) rows.push(["tokens", `${state.stats.tokens?.total ?? 0} · $${Number(state.stats.cost ?? 0).toFixed(4)}`]);
-	if (s.usageLimit) rows.push(["limit", `${s.usageLimit.stage}${s.usageLimit.resetsAtSec ? ` · resets ${new Date(s.usageLimit.resetsAtSec * 1000).toLocaleTimeString()}` : ""}`]);
+	if (s.usageLimit)
+		rows.push([
+			"limit",
+			`${s.usageLimit.stage}${s.usageLimit.resetsAtSec ? ` · resets ${new Date(s.usageLimit.resetsAtSec * 1000).toLocaleTimeString()}` : ""}`,
+		]);
 	for (const [k, v] of rows) {
 		meta.append(el("dt", null, k));
 		meta.append(el("dd", null, String(v)));
@@ -686,39 +774,76 @@ function renderHeader() {
 	renderPalette();
 }
 
+/** Welcome/empty state so a fresh chat does not look broken. */
+function renderWelcome() {
+	const existing = transcript().querySelector(".welcome");
+	const empty = state.messages.length === 0 && !cur;
+	if (!empty) {
+		existing?.remove();
+		return;
+	}
+	if (existing) return;
+	const box = el("div", "msg welcome");
+	box.append(el("div", "who", "omp webchat"));
+	box.append(
+		el(
+			"div",
+			"blocks",
+			"Ask anything. `/` lists the commands this session can dispatch, `@path` attaches files, images can be pasted, Esc stops a turn.",
+		),
+	);
+	const hints = el("div", "sub dim");
+	hints.textContent = "Streamed from `omp --mode rpc-ui` — same commands, todos, agents and sessions as the CLI.";
+	box.append(hints);
+	transcript().append(box);
+}
+
 function renderTodos() {
 	const phases = state.session?.todoPhases;
 	const card = $("todoCard");
-	if (!phases?.length) return card.classList.add("hidden");
+	if (!phases?.length) {
+		card.classList.add("hidden");
+		$("todoCount").textContent = "";
+		return;
+	}
 	card.classList.remove("hidden");
 	const body = $("todoBody");
 	body.replaceChildren();
+	let openTotal = 0;
+	let total = 0;
 	for (const phase of phases) {
 		const open = phase.tasks.filter((t) => t.status === "pending" || t.status === "in_progress" || t.status === "blocked").length;
+		openTotal += open;
+		total += phase.tasks.length;
 		body.append(el("div", "phase", `${phase.name} · ${phase.tasks.length - open}/${phase.tasks.length}`));
 		for (const task of phase.tasks) {
 			const cls = task.status === "completed" ? "done" : task.status === "in_progress" ? "active" : task.status === "blocked" ? "blocked" : "";
 			const row = el("div", `task ${cls}`);
 			const mark = { pending: "•", in_progress: "▶", completed: "✓", abandoned: "✕", blocked: "!" }[task.status] ?? "?";
 			row.append(el("span", "mark", mark));
-			row.append(el("span", null, `${task.content}${task.blocker ? ` — ${task.blocker}` : ""}`));
+			row.append(el("span", "txt", `${task.content}${task.blocker ? ` — ${task.blocker}` : ""}`));
 			body.append(row);
 		}
 	}
+	$("todoCount").textContent = `${total - openTotal}/${total} done`;
 }
 
 function renderQueue() {
 	const { steering, followUp } = state.queue;
 	const card = $("queueCard");
-	if (!steering.length && !followUp.length) return card.classList.add("hidden");
+	const total = steering.length + followUp.length;
+	$("queueCount").textContent = total ? `${total} waiting` : "";
+	if (!total) return card.classList.add("hidden");
 	card.classList.remove("hidden");
 	const body = $("queueBody");
 	body.replaceChildren();
 	const row = (text, queue) => {
 		const item = el("div", "queued");
 		item.append(el("span", "txt", text));
-		const promote = el("button", null, "↑");
-		promote.title = "promote to steering";
+		const promote = el("button", "icon-btn sm", null);
+		promote.title = "Send next (promote to steering)";
+		promote.setAttribute("aria-label", "Promote queued message");
+		promote.append(icon("chevron"));
 		promote.addEventListener("click", async () => {
 			try {
 				await must({ type: "promote_queued_message", message: text });
@@ -726,8 +851,10 @@ function renderQueue() {
 				notify(String(err.message ?? err));
 			}
 		});
-		const remove = el("button", null, "×");
-		remove.title = "remove";
+		const remove = el("button", "icon-btn sm", null);
+		remove.title = "Remove from queue";
+		remove.setAttribute("aria-label", "Remove queued message");
+		remove.append(icon("x"));
 		remove.addEventListener("click", async () => {
 			try {
 				const data = await must({ type: "remove_queued_message", message: text, queue });
@@ -745,7 +872,8 @@ function renderQueue() {
 }
 
 function agentRowNode(row) {
-	const box = el("div", "agent");
+	const box = el("div", `agent${state.drawer.selected === row.id ? " selected" : ""}`);
+	box.tabIndex = 0;
 	const top = el("div", "top");
 	top.append(el("span", "name", `${row.id ?? row.name ?? "agent"}`));
 	top.append(pill(row.status ?? "?", row.status));
@@ -759,48 +887,188 @@ function agentRowNode(row) {
 	if (row.elapsedMs) bits.push(`${(row.elapsedMs / 1000).toFixed(0)}s`);
 	else if (row.lastActivityAt) bits.push(`active ${timeAgo(row.lastActivityAt)} ago`);
 	if (bits.filter(Boolean).length) box.append(el("div", "sub", bits.filter(Boolean).join(" · ")));
-	if (row.task ?? row.activity) box.append(el("div", "sub", String(row.task ?? row.activity).replace(/\s+/g, " ").slice(0, 200)));
+	const activity = row.task ?? row.activity ?? row.currentTool;
+	if (activity) box.append(el("div", "sub", String(activity).replace(/\s+/g, " ").slice(0, 220)));
 	const acts = el("div", "acts");
-	const view = el("button", null, "transcript");
-	view.addEventListener("click", () => void showSubagentTranscript(row));
+	const view = el("button", "icon-btn sm");
+	view.title = "Open transcript";
+	view.setAttribute("aria-label", `Open transcript for ${row.id}`);
+	view.append(icon("terminal"));
+	view.addEventListener("click", (ev) => {
+		ev.stopPropagation();
+		void openAgentTranscript(row);
+	});
 	acts.append(view);
 	if (row.status === "running") {
-		const steer = el("button", null, "steer");
-		steer.addEventListener("click", async () => {
-			const text = prompt(`steer ${row.id}:`);
-			if (!text) return;
-			try {
-				await must({ type: "steer_subagent", subagentId: row.id, message: text });
-				toast(`steered ${row.id}`, "info");
-			} catch (err) {
-				notify(String(err.message ?? err));
-			}
+		const steer = el("button", "icon-btn sm");
+		steer.title = "Steer this agent";
+		steer.setAttribute("aria-label", `Steer ${row.id}`);
+		steer.append(icon("send"));
+		steer.addEventListener("click", (ev) => {
+			ev.stopPropagation();
+			steerAgent(row);
 		});
-		const kill = el("button", null, "kill");
-		kill.addEventListener("click", async () => {
-			if (!confirm(`kill ${row.id}?`)) return;
-			try {
-				await must({ type: "cancel_subagent", subagentId: row.id });
-			} catch (err) {
-				notify(String(err.message ?? err));
-			}
+		const kill = el("button", "icon-btn sm");
+		kill.title = "Kill this agent";
+		kill.setAttribute("aria-label", `Kill ${row.id}`);
+		kill.append(icon("x"));
+		kill.addEventListener("click", (ev) => {
+			ev.stopPropagation();
+			killAgent(row);
 		});
 		acts.append(steer, kill);
 	}
 	box.append(acts);
+	const select = () => void openAgentTranscript(row);
+	box.addEventListener("click", select);
+	box.addEventListener("keydown", (ev) => {
+		if (ev.key === "Enter" || ev.key === " ") {
+			ev.preventDefault();
+			select();
+		}
+	});
 	return box;
 }
 
 function renderAgents() {
-	const card = $("agentsCard");
-	const rows = [...state.subagents.values()];
-	$("agentCount").textContent = rows.length ? `(${rows.length})` : "";
-	if (!rows.length) return card.classList.add("hidden");
-	card.classList.remove("hidden");
+	const rows = [...state.subagents.values()].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+	$("agentsCount").textContent = `${rows.length} agent${rows.length === 1 ? "" : "s"}`;
+	$("agentsBtn").classList.toggle("active", state.drawer.open && rows.length > 0);
 	const body = $("agentsBody");
 	body.replaceChildren();
-	for (const row of rows) body.append(agentRowNode(row));
+	if (!rows.length) {
+		body.append(el("div", "dim", "No agents yet. Subagents spawned by the task tool appear here with their transcripts."));
+	} else {
+		for (const row of rows) body.append(agentRowNode(row));
+	}
 	for (const callId of state.agentSlots.keys()) renderAgentSlot(callId);
+}
+
+// ---------------------------------------------------------------- agent transcripts
+
+function formatAgentMessage(msg) {
+	const who = msg.role === "assistant" ? "omp" : msg.role === "user" ? "→ agent" : msg.role === "toolResult" ? `[${msg.toolName ?? "tool"}]` : msg.role;
+	return `── ${who}\n${contentText(msg.content)}`;
+}
+
+async function pullAgentTranscript(subagentId) {
+	const body = $("agentTranscriptBody");
+	let data;
+	try {
+		data = await must({ type: "get_subagent_messages", subagentId, fromByte: state.drawer.byte });
+	} catch (err) {
+		body.textContent = `transcript unavailable: ${err.message ?? err}`;
+		return;
+	}
+	if (data?.reset) {
+		body.textContent = "";
+		state.drawer.byte = 0;
+	}
+	const chunk = (data?.messages ?? []).map(formatAgentMessage).join("\n\n");
+	if (chunk) body.append(`${chunk}\n\n`);
+	if (typeof data?.nextByte === "number") state.drawer.byte = data.nextByte;
+	body.scrollTop = body.scrollHeight;
+}
+
+function scheduleAgentTail() {
+	clearInterval(state.drawer.timer);
+	state.drawer.timer = setInterval(() => {
+		if (!state.drawer.open || !state.drawer.selected || document.hidden) return;
+		void pullAgentTranscript(state.drawer.selected);
+	}, 2500);
+}
+
+async function openAgentTranscript(row) {
+	state.drawer.selected = row?.id ?? null;
+	$("agentTranscript").classList.remove("hidden");
+	$("agentTranscriptTitle").textContent = row?.id ? `transcript · ${row.id}` : "transcript";
+	$("agentTranscriptBody").textContent = row?.id ? "loading…" : "select an agent";
+	state.drawer.byte = 0;
+	if (row?.id) await pullAgentTranscript(row.id);
+	scheduleAgentTail();
+	renderAgents();
+	openDrawer();
+}
+
+function closeAgentTranscript() {
+	state.drawer.selected = null;
+	$("agentTranscript").classList.add("hidden");
+	clearInterval(state.drawer.timer);
+	state.drawer.timer = null;
+	renderAgents();
+}
+
+function agentControlModal(row, kind) {
+	const steer = kind === "steer";
+	openModal(`${steer ? "steer" : "kill"} ${row.id}`, (box) => {
+		box.append(el("div", "pre", steer ? `Message is sent to ${row.id} as its user, at its next step boundary.` : `This cancels ${row.id}'s running turn and tombstones it; it cannot be revived.`));
+		const input = steer ? el("textarea") : null;
+		if (input) input.placeholder = "message…";
+		if (input) box.append(input);
+		const foot = el("div", "foot");
+		const cancel = el("button", "ghost", "cancel");
+		const go = el("button", "primary", steer ? "send" : "kill");
+		cancel.addEventListener("click", closeModal);
+		go.addEventListener("click", async () => {
+			try {
+				if (steer) {
+					const message = input.value.trim();
+					if (!message) return;
+					await must({ type: "steer_subagent", subagentId: row.id, message });
+					toast(`steered ${row.id}`, "info");
+				} else {
+					await must({ type: "cancel_subagent", subagentId: row.id });
+					toast(`killed ${row.id}`, "warn");
+				}
+				closeModal();
+				await refreshSubagents();
+			} catch (err) {
+				notify(`${kind} failed: ${err.message ?? err}`);
+			}
+		});
+		foot.append(cancel, go);
+		box.append(foot);
+		if (input) input.focus();
+	});
+}
+
+function steerAgent(row) {
+	agentControlModal(row, "steer");
+}
+
+function killAgent(row) {
+	agentControlModal(row, "kill");
+}
+
+// ---------------------------------------------------------------- drawers (responsive)
+
+function backdrop(on) {
+	$("backdrop").hidden = !on;
+}
+
+function openDrawer() {
+	state.drawer.open = true;
+	$("app").classList.add("agents-open");
+	$("agentsDrawer").setAttribute("aria-hidden", "false");
+	$("agentsBtn").setAttribute("aria-expanded", "true");
+	backdrop(true);
+	renderAgents();
+}
+
+function closeDrawer() {
+	state.drawer.open = false;
+	$("app").classList.remove("agents-open");
+	$("agentsDrawer").setAttribute("aria-hidden", "true");
+	$("agentsBtn").setAttribute("aria-expanded", "false");
+	backdrop(false);
+	renderAgents();
+}
+
+function toggleSidebar(force) {
+	const open = force ?? !$("app").classList.contains("side-open");
+	$("app").classList.toggle("side-open", open);
+	$("sidebarToggle").setAttribute("aria-expanded", String(open));
+	backdrop(open);
 }
 
 function renderGoal() {
@@ -869,16 +1137,20 @@ function renderChats() {
 		const row = el("div", `chatRow${chat.path === active ? " active" : ""}`);
 		row.append(el("span", "title", chat.name));
 		const acts = el("div", "acts");
-		const rename = el("button", null, "✎");
-		rename.title = "rename";
+		const rename = el("button", "icon-btn sm");
+		rename.title = "Rename chat";
+		rename.setAttribute("aria-label", `Rename ${chat.name}`);
+		rename.append(icon("pencil"));
 		rename.addEventListener("click", (ev) => {
 			ev.stopPropagation();
 			renameChat(chat);
 		});
 		acts.append(rename);
 		if (chat.path !== active) {
-			const del = el("button", "del", "🗑");
-			del.title = "delete";
+			const del = el("button", "icon-btn sm del");
+			del.title = "Delete chat";
+			del.setAttribute("aria-label", `Delete ${chat.name}`);
+			del.append(icon("trash"));
 			del.addEventListener("click", (ev) => {
 				ev.stopPropagation();
 				deleteChat(chat);
@@ -995,8 +1267,12 @@ function onLiveFrame(frame) {
 
 function renderLive() {
 	const active = state.live.active || state.live.phase === "listening" || state.live.phase === "working" || state.live.phase === "speaking";
-	$("liveBtn").className = `chip ${active ? "active" : ""}`;
-	$("liveBtn").textContent = active ? `live:${state.live.phase || "on"}` : "live";
+	const btn = $("liveBtn");
+	btn.classList.toggle("active", active);
+	btn.setAttribute("aria-pressed", String(active));
+	btn.setAttribute("aria-label", active ? `Live voice: ${state.live.phase || "on"} (click to stop)` : "Start live voice session");
+	btn.title = active ? `live: ${state.live.phase || "on"}` : "Live voice (mic/speakers on the omp host)";
+	btn.replaceChildren(icon(state.live.phase === "muted" ? "mic-off" : "mic"));
 	const card = $("liveCard");
 	card.classList.toggle("hidden", !active && state.live.turns.size === 0);
 	const body = $("liveBody");
@@ -1006,7 +1282,7 @@ function renderLive() {
 		row.append(el("span", "lbl", label));
 		const track = el("div", "liveBar");
 		const fill = el("i");
-		fill.style.width = `${Math.max(0, Math.min(1, value)) * 100}%`;
+		fill.style.transform = `scaleX(${Math.max(0, Math.min(1, value))})`;
 		track.append(fill);
 		row.append(track);
 		return row;
@@ -1271,23 +1547,6 @@ function showSessions() {
 	});
 }
 
-async function showSubagentTranscript(row) {
-	openModal(`agent ${row.id}`, (box) => {
-		const pre = el("pre", "pre", "loading…");
-		box.append(pre);
-	});
-	try {
-		const data = await must({ type: "get_subagent_messages", subagentId: row.id });
-		const lines = (data?.messages ?? []).map((m) => {
-			const who = m.role === "assistant" ? "omp" : m.role === "user" ? "→agent" : m.role === "toolResult" ? `[${m.toolName}]` : m.role;
-			return `── ${who}\n${contentText(m.content)}`;
-		});
-		$("modal").querySelector("pre").textContent = lines.join("\n\n") || "(no messages yet)";
-	} catch (err) {
-		$("modal").querySelector("pre").textContent = String(err.message ?? err);
-	}
-}
-
 function showBtw() {
 	openModal("/btw side question", (box) => {
 		const input = el("textarea");
@@ -1367,6 +1626,7 @@ function onUIRequest(req) {
 			return;
 		default:
 			uiQueue.push({ req, cancel: () => closeModal() });
+			ping("ask", "omp needs your answer", `${req.method}: ${req.title ?? req.message ?? ""}`.slice(0, 160));
 			if (uiQueue.length === 1) presentNextUIRequest();
 	}
 }
@@ -1486,6 +1746,218 @@ function presentNextUIRequest() {
 		foot.append(cancel, ok);
 		box.append(foot);
 	});
+}
+
+// ---------------------------------------------------------------- popovers
+
+let popoverAnchor = null;
+
+function closePopover() {
+	const box = $("popover");
+	if (box.classList.contains("hidden")) return;
+	box.classList.add("hidden");
+	box.replaceChildren();
+	popoverAnchor?.setAttribute("aria-expanded", "false");
+	popoverAnchor = null;
+}
+
+/** Anchored picker above its trigger (the composer row sits at the bottom of the viewport). */
+function openPickerPopover(anchor, { title, placeholder, items, onPick, width }) {
+	closePopover();
+	const box = $("popover");
+	const head = el("div", "menu-head", title);
+	const field = el("div", "field");
+	field.append(icon("search"));
+	const input = el("input");
+	input.type = "text";
+	input.placeholder = placeholder ?? "filter…";
+	input.setAttribute("aria-label", placeholder ?? title);
+	field.append(input);
+	const list = el("div", "list");
+	box.append(head, field, list);
+	const paint = (filter) => {
+		list.replaceChildren();
+		const rows = items.filter((it) => !filter || `${it.label} ${it.sub ?? ""} ${it.hint ?? ""}`.toLowerCase().includes(filter)).slice(0, 400);
+		if (!rows.length) list.append(el("div", "opt dim", "no match"));
+		for (const it of rows) {
+			const row = el("div", "opt");
+			row.append(el("span", null, it.label));
+			if (it.sub) row.append(el("span", "sub", it.sub));
+			if (it.hint) row.append(el("span", "count", it.hint));
+			row.addEventListener("click", () => {
+				closePopover();
+				onPick(it);
+			});
+			list.append(row);
+		}
+	};
+	input.addEventListener("input", () => paint(input.value.toLowerCase()));
+	paint("");
+	box.classList.remove("hidden");
+	const w = Math.max(240, Math.min(width ?? 380, window.innerWidth - 16));
+	box.style.width = `${w}px`;
+	const h = box.offsetHeight;
+	const r = anchor.getBoundingClientRect();
+	const left = Math.min(Math.max(8, r.left - 8), window.innerWidth - w - 8);
+	const above = r.top - h - 10;
+	box.style.left = `${left}px`;
+	box.style.top = `${Math.max(8, above)}px`;
+	anchor.setAttribute("aria-expanded", "true");
+	popoverAnchor = anchor;
+	input.focus();
+}
+
+function showModelPicker(anchor) {
+	openPickerPopover(anchor, {
+		title: "model",
+		placeholder: "filter models…",
+		width: 460,
+		items: state.models.map((m) => ({ label: m.id, sub: m.name ?? "", hint: m.provider, value: m })),
+		onPick: async (item) => {
+			try {
+				await must({ type: "set_model", provider: item.value.provider, modelId: item.value.id });
+				await refreshState();
+				toast(`model → ${item.value.id}`, "info");
+			} catch (err) {
+				notify(`model switch failed: ${err.message ?? err}`);
+			}
+		},
+	});
+}
+
+function showEffortPicker(anchor) {
+	const levels = state.levels.length ? state.levels : ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+	openPickerPopover(anchor, {
+		title: "reasoning effort",
+		placeholder: "filter…",
+		width: 280,
+		items: levels.map((l) => ({ label: l, hint: l === state.session?.thinkingLevel ? "current" : "", value: l })),
+		onPick: async (item) => {
+			try {
+				await must({ type: "set_thinking_level", level: item.value });
+				await refreshState();
+			} catch (err) {
+				notify(`effort switch failed: ${err.message ?? err}`);
+			}
+		},
+	});
+}
+
+// ---------------------------------------------------------------- notifications
+
+const NOTIFY_KEY = "omp-webchat.notify";
+
+function loadNotifyPrefs() {
+	try {
+		const raw = localStorage.getItem(NOTIFY_KEY);
+		if (raw) state.notify = { ...state.notify, ...JSON.parse(raw) };
+	} catch {
+		// storage unavailable: keep defaults
+	}
+	state.notify.permission = "Notification" in window ? Notification.permission : "unsupported";
+	renderBell();
+}
+
+function saveNotifyPrefs() {
+	try {
+		localStorage.setItem(NOTIFY_KEY, JSON.stringify({ enabled: state.notify.enabled, sound: state.notify.sound }));
+	} catch {
+		// storage unavailable: preference is session-only
+	}
+}
+
+function renderBell() {
+	const btn = $("bellBtn");
+	const on = state.notify.enabled && state.notify.permission !== "unsupported";
+	btn.setAttribute("aria-pressed", String(on));
+	const label = state.notify.permission === "unsupported" ? "Desktop notifications unavailable" : `Desktop notifications: ${on ? "on" : "off"}`;
+	btn.setAttribute("aria-label", label);
+	btn.title = state.notify.permission === "denied" ? "Notifications blocked in the browser" : label;
+	btn.replaceChildren(icon(state.notify.enabled ? "bell" : "bell-off"));
+}
+
+async function toggleNotifications() {
+	if (!("Notification" in window)) {
+		toast("this browser has no Notification API", "warn");
+		return;
+	}
+	state.notify.enabled = !state.notify.enabled;
+	state.notify.permission = Notification.permission;
+	if (state.notify.enabled && state.notify.permission === "default") {
+		// Do not block the toggle on the prompt: some contexts never resolve it.
+		void Notification.requestPermission().then((permission) => {
+			state.notify.permission = permission;
+			renderBell();
+			if (permission !== "granted") toast("desktop notifications are blocked — in-page alerts and the chime still work", "warn");
+		});
+	}
+	saveNotifyPrefs();
+	renderBell();
+	toast(
+		state.notify.enabled
+			? state.notify.permission === "granted"
+				? "notifications on — finished turns, questions and approvals will ping you"
+				: "notifications on for this page; desktop banners await browser permission"
+			: "notifications off",
+		state.notify.enabled ? "info" : "warn",
+	);
+	if (state.notify.enabled) ping("test", "omp webchat", "notifications are on");
+}
+
+let titleTimer = null;
+const BASE_TITLE = document.title;
+
+function flashTitle(text) {
+	if (!document.hidden) return;
+	document.title = `● ${text}`;
+	clearTimeout(titleTimer);
+	titleTimer = setTimeout(() => {
+		document.title = BASE_TITLE;
+	}, 15000);
+}
+
+function chime(kind) {
+	try {
+		const Ctx = window.AudioContext ?? window.webkitAudioContext;
+		if (!Ctx) return;
+		const ctx = new Ctx();
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		const notes = { done: [660, 990], ask: [520, 780], error: [400, 300], test: [880, 880] };
+		const [a, b] = notes[kind] ?? notes.done;
+		osc.type = "sine";
+		osc.frequency.setValueAtTime(a, ctx.currentTime);
+		osc.frequency.setValueAtTime(b, ctx.currentTime + 0.12);
+		gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+		gain.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.02);
+		gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+		osc.connect(gain).connect(ctx.destination);
+		osc.start();
+		osc.stop(ctx.currentTime + 0.4);
+		osc.addEventListener("ended", () => void ctx.close());
+	} catch {
+		// audio unavailable: silently skip
+	}
+}
+
+/** Alert for something the user must act on (finished turn, question, approval, error). */
+function ping(kind, title, body) {
+	if (!state.notify.enabled) return;
+	const away = document.hidden || !document.hasFocus();
+	if (kind !== "test" && !away) return;
+	if (away && state.notify.permission === "granted") {
+		try {
+			const n = new Notification(title, { body, tag: `omp-webchat-${kind}`, silent: true });
+			n.addEventListener("click", () => {
+				window.focus();
+				n.close();
+			});
+		} catch {
+			// notification constructor unavailable (e.g. some mobile browsers)
+		}
+	}
+	if (state.notify.sound) chime(kind);
+	if (away) flashTitle(title);
 }
 
 // ---------------------------------------------------------------- composer
@@ -1654,8 +2126,9 @@ function paletteMove(delta) {
 
 $("input").addEventListener("input", () => {
 	renderPalette();
-	$("input").style.height = "auto";
-	$("input").style.height = `${Math.min($("input").scrollHeight, window.innerHeight * 0.4)}px`;
+	const node = $("input");
+	node.style.height = "auto";
+	node.style.height = `${Math.min(node.scrollHeight, window.innerHeight * 0.4)}px`;
 });
 
 $("input").addEventListener("keydown", (ev) => {
@@ -1683,41 +2156,123 @@ $("input").addEventListener("keydown", (ev) => {
 });
 
 document.addEventListener("keydown", (ev) => {
-	if (ev.key === "Escape") {
-		if (!$("modalWrap").classList.contains("hidden")) {
-			ev.preventDefault();
-			closeModal();
-			return;
-		}
-		if (document.activeElement !== $("input")) {
-			ev.preventDefault();
-			void abort();
-		}
+	if (ev.key !== "Escape") return;
+	if (!$("popover").classList.contains("hidden")) {
+		ev.preventDefault();
+		closePopover();
+		return;
+	}
+	if (!$("modalWrap").classList.contains("hidden")) {
+		ev.preventDefault();
+		closeModal();
+		return;
+	}
+	if ($("app").classList.contains("side-open")) {
+		toggleSidebar(false);
+		return;
+	}
+	if (state.drawer.open) {
+		closeDrawer();
+		return;
+	}
+	if (document.activeElement !== $("input")) {
+		ev.preventDefault();
+		void abort();
+	}
+});
+
+// keep the drawer/sidebar honest across breakpoints
+window.addEventListener("resize", () => {
+	closePopover();
+	if (window.innerWidth > 900) {
+		toggleSidebar(false);
+		backdrop(state.drawer.open);
 	}
 });
 
 $("sendBtn").addEventListener("click", () => void submit());
+$("stopBtn").addEventListener("click", () => void abort());
+$("attachBtn").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", (ev) => addFiles(ev.target.files ?? []));
 $("newChatBtn").addEventListener("click", () => void newChat());
 $("refreshChatsBtn").addEventListener("click", () => void loadChats());
 $("chatSearch").addEventListener("input", () => renderChats());
-$("stopBtn").addEventListener("click", () => void abort());
+$("sessionBtn").addEventListener("click", () => showSessions());
 $("commandsBtn").addEventListener("click", () => showCommands());
-$("btwBtn").addEventListener("click", () => showBtw());
+$("modelBtn").addEventListener("click", (ev) => showModelPicker(ev.currentTarget));
+$("thinkingBtn").addEventListener("click", (ev) => showEffortPicker(ev.currentTarget));
+$("btwBtn").addEventListener("click", () => {
+	closePopover();
+	showBtw();
+});
+$("bellBtn").addEventListener("click", () => void toggleNotifications());
+$("moreBtn").addEventListener("click", (ev) => {
+	const menu = $("moreMenu");
+	const open = menu.classList.contains("hidden");
+	menu.classList.toggle("hidden", !open);
+	$("moreBtn").setAttribute("aria-expanded", String(open));
+	if (open) ev.stopPropagation();
+});
+$("moreMenu").addEventListener("click", (ev) => {
+	const row = ev.target.closest(".menu-row");
+	if (row && row.id !== "btwBtn") ev.stopPropagation();
+});
+$("exportBtn").addEventListener("click", async () => {
+	closePopover();
+	$("moreMenu").classList.add("hidden");
+	try {
+		const text = state.messages
+			.map((m) => `${m.role === "assistant" ? "omp" : m.role}\n${contentText(m.content)}`)
+			.join("\n\n―――――\n\n");
+		await navigator.clipboard.writeText(text);
+		toast("transcript copied to clipboard", "info");
+	} catch (err) {
+		notify(`copy failed: ${err.message ?? err}`);
+	}
+});
+$("restartBtn").addEventListener("click", async () => {
+	$("moreMenu").classList.add("hidden");
+	await fetch("/api/restart", { method: "POST" }).catch(() => {});
+	toast("restarting omp…", "warn");
+});
+document.addEventListener("click", (ev) => {
+	const menu = $("moreMenu");
+	if (!menu.classList.contains("hidden") && !menu.contains(ev.target) && !$("moreBtn").contains(ev.target)) {
+		menu.classList.add("hidden");
+		$("moreBtn").setAttribute("aria-expanded", "false");
+	}
+	const pop = $("popover");
+	if (!pop.classList.contains("hidden") && !pop.contains(ev.target) && !popoverAnchor?.contains(ev.target)) closePopover();
+});
+$("scroll").addEventListener("scroll", () => closePopover(), { passive: true });
+
+$("sidebarToggle").addEventListener("click", () => toggleSidebar());
+$("backdrop").addEventListener("click", () => {
+	toggleSidebar(false);
+	if (state.drawer.open) closeDrawer();
+});
+$("agentsBtn").addEventListener("click", () => (state.drawer.open ? closeDrawer() : openDrawer()));
+$("agentsCloseBtn").addEventListener("click", () => closeDrawer());
+$("agentsRefreshBtn").addEventListener("click", () => void refreshSubagents());
+$("agentTranscriptClose").addEventListener("click", () => closeAgentTranscript());
+$("agentTailBtn").addEventListener("click", (ev) => {
+	state.drawer.tail = !state.drawer.tail;
+	ev.currentTarget.setAttribute("aria-pressed", String(state.drawer.tail));
+});
 $("liveBtn").addEventListener("click", () => void toggleLive());
 $("liveMuteBtn").addEventListener("click", async () => {
 	try {
 		const frame = await cmd({ type: "live_mute" });
 		if (frame?.success === false) throw new Error(frame.error);
-		toast(`microphone ${frame?.data?.muted ? "muted" : "unmuted"}`, "info");
+		const muted = Boolean(frame?.data?.muted);
+		const btn = $("liveMuteBtn");
+		btn.replaceChildren(icon(muted ? "mic-off" : "mic"));
+		btn.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
+		toast(`microphone ${muted ? "muted" : "unmuted"}`, "info");
 	} catch (err) {
 		notify(`live mute failed: ${err.message ?? err}`);
 	}
 });
-$("modelBtn").addEventListener("click", () => showModels());
-$("thinkingBtn").addEventListener("click", () => showThinking());
-$("sessionBtn").addEventListener("click", () => showSessions());
-$("attachBtn").addEventListener("click", () => $("fileInput").click());
-$("fileInput").addEventListener("change", (ev) => addFiles(ev.target.files ?? []));
 $("modalWrap").addEventListener("click", (ev) => {
 	if (ev.target === $("modalWrap")) closeModal();
 });
@@ -1767,10 +2322,12 @@ $("warmingBtn").addEventListener("click", async () => {
 	try {
 		const data = await must({ type: "set_cache_warming", mode: next });
 		$("warmingBtn").dataset.mode = data?.mode ?? next;
-		$("warmingBtn").textContent = `warm:${data?.mode ?? next}`;
+		renderHeader();
 	} catch (err) {
 		notify(String(err.message ?? err));
 	}
 });
 
+loadNotifyPrefs();
 renderHeader();
+renderWelcome();

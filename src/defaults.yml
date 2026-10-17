@@ -1,0 +1,11 @@
+# Default settings overlay for webchat-hosted sessions.
+#
+# `eval.tools.enabled` advertises the `tools` spawn field on the task tool: "named tools already
+# defined in the parent's Python or JS eval kernel". A browser chat has no eval kernel, so models
+# happily pass tools like ["read"] and the spawn dies with
+#   Task execution failed: Unknown eval tool(s): ["read"] ... Available: none
+# Disabling it here removes the field from the schema; subagents spawn normally.
+# Override with your own --config or pass --no-defaults to the server.
+eval:
+  tools:
+    enabled: false

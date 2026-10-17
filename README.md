@@ -32,7 +32,13 @@ Flags:
 | `--omp <path>` | omp binary (default: `omp` on PATH) |
 | `--open` | open the default browser |
 | `--selftest` | print resolved config and exit |
+| `--no-defaults` | do not apply the bundled settings overlay (`src/defaults.yml`) |
 | `-- <args…>` | everything after `--` is forwarded to `omp`, e.g. `-- --continue --approval-mode=always-ask` |
+
+The bundled overlay disables `eval.tools.enabled`, which otherwise advertises the task tool's
+`tools` field ("named tools already defined in the parent's eval kernel"). A browser chat has no
+eval kernel, so models pass names like `["read"]` and the spawn dies with
+`Unknown eval tool(s)`. Bring your own `--config` (or `--no-defaults`) to opt out.
 
 ## Install as an omp plugin
 
@@ -68,14 +74,46 @@ otherwise from the first user message.
 
 ## UI
 
-- **Transcript** — user/assistant turns, streamed thinking, markdown with code fences, usage per turn.
-- **Tool cards** — args (collapsible), live status (`running`/`ok`/`failed`), partial output while running, full result after; failed calls are tinted red.
-- **Todos** — sidebar card from the session's todo state (phases, per-task status marks, counts).
-- **Agents** — sidebar roster plus an inline card under the spawning `task` call; per agent: status, model, tokens, elapsed, task; actions *transcript* (tail its JSONL), *steer*, *kill*.
-- **Queue** — steering/follow-up chips with promote (`↑`) and remove (`×`).
-- **Composer** — `Enter` sends, `Shift+Enter` newline, `Esc` aborts (`abort_and_restore_queue`, queued text comes back), `steer while busy` chooses steer vs follow-up, `/` opens the command palette (builtins + extension commands + skills + templates), image paste/drop attaches images.
-- **Header** — session name, model picker (`get_available_models`), thinking level, fast/slow tier toggles, auto-compaction toggle, cache-warming cycle, context/tokens, commands modal, `/btw`, live voice, stop.
-- **Dialogs** — the `ask` tool, tool approvals, and any `select`/`confirm`/`input`/`editor` request render as modals; `notify` shows a toast, `setStatus`/`setWidget`/`set_editor_text`/`open_url` are honored.
+Dark developer-console theme (tokens from the ui-ux-pro-max "Dark Mode (OLED)" palette, IBM Plex
+Sans + JetBrains Mono, 8px rhythm, subset of Lucide-style inline SVG icons — no emoji), laid out as
+header / sidebar / chat / agents drawer.
+
+- **Layout** — only the chat scrolls: the composer and the sidebar never move, and the page itself
+  has no scrollbar (`min-height: 0` grid tracks, `overflow: hidden` shell).
+- **Transcript** — user bubbles right-aligned, assistant turns with streamed thinking, markdown with
+  colored code (comments/strings/numbers/keywords/calls), colored inline spans (code, `/commands`,
+  `@mentions`, file paths, links) and per-turn usage.
+- **Tool cards** — args (collapsible), live status pill, spinner + pulsing outline while running,
+  partial output during the run, full result after; failures tinted red.
+- **Motion** — indeterminate top bar while the agent works, shimmer on streaming thinking, blinking
+  caret mid-stream, rise-in for new rows; all compositor-only (`transform`/`opacity`) and disabled
+  under `prefers-reduced-motion`.
+- **Composer** — single rounded box with the standard AI-chat toolbar: attach image, live voice,
+  model picker, reasoning effort, command palette, steer toggle, stop, send. `Enter` sends,
+  `Shift+Enter` newline, `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens
+  the palette (arrows + `Tab` to pick), images can be pasted or dropped.
+- **Header** — connection dot, session name, context/tokens, agents counter, notification bell, and a
+  "more" menu (fast, slow, auto-compaction, cache warming, `/btw`, export transcript, restart).
+- **Chats sidebar** — grouped by age (today / yesterday / previous 7 days / older), search, rename,
+  delete (with confirmation, never the active chat), **＋ new chat**, active-chat marker. Below it:
+  session facts, todo card (`0/3 done` count announced via `role="status"`), queued chips with
+  promote/remove, goal, live-voice meters, extension widgets.
+- **Agents drawer** — roster with status, agent, model, tokens, elapsed, current assignment; click a
+  row (or the inline card under its `task` call) to tail that agent's JSONL transcript in place
+  (`get_subagent_messages` with `fromByte`), plus steer/kill and a live-tail toggle.
+- **Dialogs** — the `ask` tool, tool approvals, and any `select`/`confirm`/`input`/`editor` request
+  render as modals; `notify` shows a toast, `setStatus`/`setWidget`/`set_editor_text`/`open_url` are honored.
+- **Responsive** — under 900px the sidebar and agents drawer become slide-over sheets with a
+  backdrop (`Esc` closes), header meta collapses, chat rows and icon buttons grow to ≥40px, and the
+  composer respects `env(safe-area-inset-bottom)`.
+- **Scrollbars** — thin, dark, borderless thumbs that brighten on hover (`scrollbar-width`/`::-webkit-scrollbar`).
+
+### Notifications
+
+The bell toggles alerts (persisted in `localStorage`). When enabled, omp pings you — system
+notification + chime + `●` tab title — only while the page is hidden or unfocused, for: a finished
+turn, a failed turn, an `ask`/approval dialog waiting on you. Desktop banners need browser
+permission (asked on the first toggle); the in-page toast, chime and title flash work regardless.
 
 ### Answering the agent
 
