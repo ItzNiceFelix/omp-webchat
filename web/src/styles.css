@@ -409,6 +409,19 @@ main {
 	display: flex;
 }
 
+/* A touch screen never fires :hover, so the rename/delete buttons would be unreachable on a
+   phone: keep them visible wherever hover is unavailable. */
+@media (hover: none) {
+	.chat-actions {
+		display: flex;
+	}
+
+	.chat-actions button {
+		width: 26px;
+		height: 26px;
+	}
+}
+
 .chat-actions button {
 	width: 22px;
 	height: 22px;
