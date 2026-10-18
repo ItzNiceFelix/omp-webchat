@@ -1834,9 +1834,11 @@ function positionPopover() {
 	const anchor = popoverAnchor.getBoundingClientRect();
 	const spaceAbove = anchor.top - offY - 12;
 	const spaceBelow = offY + viewH - anchor.bottom - 12;
-	// Prefer opening upward (composer sits at the bottom), but never off-screen.
+	// Prefer opening upward (composer sits at the bottom), but never off-screen, and keep a
+	// phone picker to ~60% of the viewport so the conversation stays visible behind it.
+	const cap = Math.max(180, Math.min(viewH * 0.62, viewH - 24));
 	const placeAbove = spaceAbove >= Math.min(260, Math.max(spaceBelow, 0));
-	const available = Math.max(160, Math.min(placeAbove ? spaceAbove : spaceBelow, viewH - 24));
+	const available = Math.max(160, Math.min(placeAbove ? spaceAbove : spaceBelow, cap));
 	box.style.maxHeight = `${available}px`;
 	const height = box.offsetHeight;
 	const left = Math.min(Math.max(offX + 8, anchor.left), offX + viewW - width - 8);
