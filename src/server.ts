@@ -459,6 +459,10 @@ function serverFile(pathname: string) {
 	return full.startsWith(PUBLIC_DIR) ? full : null;
 }
 
+// A full restart relaunches this process while the old one still holds the port.
+const bootDelay = Number(Bun.env.OMP_WEBCHAT_BOOT_DELAY ?? 0);
+if (bootDelay > 0) await Bun.sleep(bootDelay);
+
 const server = Bun.serve<{ id: string }>({
 	hostname: HOST,
 	port: PORT,
@@ -501,9 +505,24 @@ const server = Bun.serve<{ id: string }>({
 			return Response.json({ sessions: await listSessions(Number(url.searchParams.get("limit") ?? 40)) });
 		}
 		if (url.pathname === "/api/restart" && req.method === "POST") {
+			if (url.searchParams.get("full") === "1") {
+				// Relaunch this exact server (argv preserved) after the port is released.
+				const self = Bun.spawn([process.execPath, ...Bun.argv.slice(1)], {
+					cwd: process.cwd(),
+					env: { ...Bun.env, OMP_WEBCHAT_BOOT_DELAY: "900" },
+					detached: true,
+					stdio: ["ignore", "ignore", "ignore"],
+					windowsHide: true,
+				});
+				self.unref();
+				shuttingDown = true;
+				child?.kill();
+				setTimeout(() => process.exit(0), 250);
+				return Response.json({ ok: true, restarting: "server", pid: self.pid });
+			}
 			child?.kill();
 			setTimeout(spawnOmp, 200);
-			return Response.json({ ok: true });
+			return Response.json({ ok: true, restarting: "omp" });
 		}
 		const file = serverFile(url.pathname);
 		if (!file) return new Response("not found", { status: 404 });

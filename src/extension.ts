@@ -24,14 +24,33 @@ export default function webchatExtension(pi: ExtensionAPI) {
 				.split(/\s+/)
 				.filter(Boolean);
 			const port = Number(tokens.find((t) => /^\d+$/.test(t))) || DEFAULT_PORT;
-			const extras = tokens.filter((t) => !/^\d+$/.test(t));
+			const extras = tokens.filter((t) => !/^\d+$/.test(t) && t !== "restart");
 			const url = `http://127.0.0.1:${port}`;
 
 			const already = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(1500) })
 				.then((res) => (res.ok ? (res.json() as Promise<{ cwd: string }>) : null))
 				.catch(() => null);
+			if (already && tokens.includes("restart")) {
+				const restarted = await fetch(`${url}/api/restart?full=1`, { method: "POST" })
+					.then((res) => res.ok)
+					.catch(() => false);
+				if (!restarted) {
+					ctx.ui.notify(`webchat restart failed on ${url}`, "error");
+					return;
+				}
+				const deadline = Date.now() + READY_TIMEOUT_MS;
+				while (Date.now() < deadline) {
+					const up = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(1000) })
+						.then((res) => res.ok)
+						.catch(() => false);
+					if (up) break;
+					await Bun.sleep(300);
+				}
+				ctx.ui.notify(`webchat restarted on ${url}`, "info");
+				return;
+			}
 			if (already) {
-				ctx.ui.notify(`webchat already running for ${already.cwd}: ${url}`, "info");
+				ctx.ui.notify(`webchat already running for ${already.cwd}: ${url}  (/webchat restart to relaunch)`, "info");
 				openBrowser(url);
 				return;
 			}

@@ -2235,6 +2235,20 @@ $("restartBtn").addEventListener("click", async () => {
 	await fetch("/api/restart", { method: "POST" }).catch(() => {});
 	toast("restarting omp…", "warn");
 });
+$("restartServerBtn").addEventListener("click", async () => {
+	$("moreMenu").classList.add("hidden");
+	await fetch("/api/restart?full=1", { method: "POST" }).catch(() => {});
+	toast("webchat server restarting — the page reconnects in a moment", "warn");
+	let back = false;
+	for (let i = 0; i < 20 && !back; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		back = await fetch("/api/info", { cache: "no-store" })
+			.then((r) => r.ok)
+			.catch(() => false);
+	}
+	if (back) location.reload();
+	else toast("server did not come back — start it again manually", "error");
+});
 document.addEventListener("click", (ev) => {
 	const menu = $("moreMenu");
 	if (!menu.classList.contains("hidden") && !menu.contains(ev.target) && !$("moreBtn").contains(ev.target)) {
