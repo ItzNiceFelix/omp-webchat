@@ -135,15 +135,18 @@
 					<div class="composer-box">
 						<textarea id="input" rows="1" placeholder="Message omp…   / commands   Shift+Enter newline" aria-label="Message"></textarea>
 						<div class="composer-tools">
-							<button class="icon-btn sm" id="attachBtn" aria-label="Attach image" title="Attach image"><svg class="ic" aria-hidden="true"><use href="#i-paperclip" /></svg></button>
-							<button class="icon-btn sm" id="liveBtn" aria-label="Live voice session" title="Live voice (mic/speakers on the omp host)" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-mic" /></svg></button>
-							<button class="chip ghost sm" id="modelBtn" title="Model"><svg class="ic" aria-hidden="true"><use href="#i-chip" /></svg><span id="modelLabel">model</span></button>
-							<button class="chip ghost sm" id="thinkingBtn" title="Reasoning effort"><svg class="ic" aria-hidden="true"><use href="#i-gauge" /></svg><span id="thinkingLabel">effort</span></button>
-							<button class="chip ghost sm" id="commandsBtn" title="Commands"><svg class="ic" aria-hidden="true"><use href="#i-terminal" /></svg><span>/</span></button>
-							<span class="spacer"></span>
-							<label class="toggle" title="When busy: steer the current turn instead of queueing"><input type="checkbox" id="steerBox" checked /><span>steer</span></label>
-							<button class="icon-btn" id="stopBtn" aria-label="Stop (Esc)" title="Stop (Esc)" disabled><svg class="ic" aria-hidden="true"><use href="#i-stop" /></svg></button>
-							<button class="icon-btn primary" id="sendBtn" aria-label="Send message" title="Send (Enter)"><svg class="ic" aria-hidden="true"><use href="#i-send" /></svg></button>
+							<div class="ct-group">
+								<button class="icon-btn sm" id="attachBtn" aria-label="Attach image" title="Attach image"><svg class="ic" aria-hidden="true"><use href="#i-paperclip" /></svg></button>
+								<button class="icon-btn sm" id="liveBtn" aria-label="Live voice session" title="Live voice (mic/speakers on the omp host)" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-mic" /></svg></button>
+								<button class="chip ghost sm" id="modelBtn" title="Model"><svg class="ic" aria-hidden="true"><use href="#i-chip" /></svg><span id="modelLabel">model</span></button>
+								<button class="chip ghost sm" id="thinkingBtn" title="Reasoning effort"><svg class="ic" aria-hidden="true"><use href="#i-gauge" /></svg><span id="thinkingLabel">effort</span></button>
+							</div>
+							<div class="ct-group ct-actions">
+								<button class="chip ghost sm" id="commandsBtn" title="Commands"><svg class="ic" aria-hidden="true"><use href="#i-terminal" /></svg><span>/</span></button>
+								<label class="toggle" title="When busy: steer the current turn instead of queueing"><input type="checkbox" id="steerBox" checked /><span>steer</span></label>
+								<button class="icon-btn" id="stopBtn" aria-label="Stop (Esc)" title="Stop (Esc)" disabled><svg class="ic" aria-hidden="true"><use href="#i-stop" /></svg></button>
+								<button class="icon-btn primary" id="sendBtn" aria-label="Send message" title="Send (Enter)"><svg class="ic" aria-hidden="true"><use href="#i-send" /></svg></button>
+							</div>
 						</div>
 					</div>
 					<div class="composer-hint"><span class="dim" id="hint"></span></div>
