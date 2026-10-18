@@ -14,6 +14,13 @@ ikut berubah.
 3. Unduh artifact `omp-webchat-debug-apk`, ekstrak, install `app-debug.apk`.
 
 ## Pakai
-1. Salin `scripts/start-webchat.sh` ke `~/` di Termux, lalu `bash ~/start-webchat.sh`.
+1. Salin `scripts/start-webchat.sh` ke `~/` di Termux (`cp scripts/start-webchat.sh ~/`), lalu
+   jalankan **di Termux**, bukan di dalam proot: `bash ~/start-webchat.sh`.
+   Script ini mendeteksi sendiri alias distro proot-distro yang terpasang (override dengan
+   `DISTRO=ubuntu`), memilih `server.ts` yang ada (plugin `~/.omp/plugins/...` atau checkout repo),
+   dan menolak jalan kalau dipanggil dari dalam proot.
 2. Buka app. Kalau server hidup, langsung terhubung.
 3. Ganti alamat: tekan Back dari UI chat untuk kembali ke layar alamat.
+
+Berhenti: `Ctrl+C` di Termux. Transkrip tetap di `~/.omp/agent/sessions`, jadi chat lama muncul
+lagi di sidebar begitu server dinyalakan untuk folder yang sama.
