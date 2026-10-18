@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>omp webchat</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #000; color: #e6e6e6; font: 16px/1.5 system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px; }
+  main { width: 100%; max-width: 440px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { margin: 0 0 16px; color: #9aa; }
+  label { display: block; font-size: 13px; color: #9aa; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #333; background: #111; color: #fff; font: inherit; }
+  button { margin-top: 12px; width: 100%; padding: 12px; border-radius: 10px; border: 0; background: #2f81f7; color: #fff; font: inherit; font-weight: 600; }
+  button.alt { background: #1c1c1c; color: #ddd; border: 1px solid #333; }
+  .status { margin: 16px 0; padding: 12px; border-radius: 10px; background: #111; border: 1px solid #222; font-size: 14px; }
+  .bad { border-color: #6b2b2b; }
+  code { background: #1a1a1a; padding: 2px 6px; border-radius: 6px; font-size: 13px; word-break: break-all; }
+  pre { background: #111; border: 1px solid #222; padding: 12px; border-radius: 10px; overflow-x: auto; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>omp webchat</h1>
+  <p>Menghubungkan ke server…</p>
+  <div id="status" class="status">Memeriksa…</div>
+  <label for="addr">Alamat server</label>
+  <input id="addr" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <button id="go">Hubungkan</button>
+  <button id="retry" class="alt">Coba lagi</button>
+  <div id="help" hidden>
+    <p style="margin-top:16px">Server belum jalan. Di Termux, jalankan:</p>
+    <pre>bash ~/start-webchat.sh</pre>
+  </div>
+</main>
+<script>
+const KEY = "ompwebchat.addr";
+const DEFAULT = "http://127.0.0.1:7788";
+const $ = (id) => document.getElementById(id);
+
+function load() { try { return localStorage.getItem(KEY) || DEFAULT; } catch { return DEFAULT; } }
+function save(v) { try { localStorage.setItem(KEY, v); } catch {} }
+function normalize(v) {
+  v = v.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+  return v;
+}
+
+async function reachable(base) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 2500);
+  try {
+    // no-cors: the server sends no CORS headers; an opaque response still proves it is up.
+    await fetch(base + "/api/info", { mode: "no-cors", signal: ctl.signal, cache: "no-store" });
+    return true;
+  } catch { return false; } finally { clearTimeout(t); }
+}
+
+async function connect(auto) {
+  const base = normalize($("addr").value);
+  save(base);
+  $("status").className = "status";
+  $("status").textContent = "Memeriksa " + base + " …";
+  $("help").hidden = true;
+  if (await reachable(base)) {
+    $("status").textContent = "Terhubung. Membuka…";
+    location.href = base + "/";
+  } else {
+    $("status").className = "status bad";
+    $("status").textContent = "Tidak bisa menjangkau " + base;
+    $("help").hidden = base !== DEFAULT;
+  }
+}
+
+$("addr").value = load();
+$("go").onclick = () => connect(false);
+$("retry").onclick = () => connect(false);
+
+// Auto-connect on a fresh launch, but not when the user came back here with the Back button
+// (that is how they reach this screen to change the address).
+const nav = performance.getEntriesByType("navigation")[0];
+if (!nav || nav.type !== "back_forward") connect(true);
+else { $("status").textContent = "Ubah alamat lalu tekan Hubungkan."; }
+window.addEventListener("pageshow", (e) => { if (e.persisted) $("status").textContent = "Ubah alamat lalu tekan Hubungkan."; });
+</script>
+</body>
+</html>

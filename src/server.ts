@@ -13,7 +13,7 @@ import type { ServerWebSocket } from "bun";
 import { existsSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 /** Frames on the wire are opaque JSON objects; only the routing keys are validated. */
 type Frame = Record<string, unknown> & { type?: unknown; id?: unknown };
@@ -48,7 +48,9 @@ const CWD = resolve(String(opts.cwd ?? process.cwd()));
 const PORT = Number(opts.port ?? Bun.env.OMP_WEBCHAT_PORT ?? 7788);
 const HOST = String(opts.host ?? "127.0.0.1");
 const OMP_BIN = String(opts.omp ?? Bun.which("omp") ?? "omp");
-const PUBLIC_DIR = join(import.meta.dir, "public");
+/** Vite build output of `web/` (`npm run build` there); the server never builds it itself. */
+const WEB_DIR = join(import.meta.dir, "..", "web", "dist");
+const INDEX_FILE = join(WEB_DIR, "index.html");
 /** Settings overlay applied to the child unless the caller brings their own --config. */
 const DEFAULT_CONFIG = join(import.meta.dir, "defaults.yml");
 const SESSIONS_ROOT = join(Bun.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".omp", "agent"), "sessions");
@@ -282,7 +284,53 @@ const HOST_TOOLS = [
 			additionalProperties: false,
 		},
 	},
+	{
+		name: "webchat_copy",
+		label: "Copy To Clipboard",
+		description: "Put text on the user's clipboard (the browser running webchat). Use for snippets the user would otherwise have to select by hand.",
+		parameters: {
+			type: "object",
+			properties: { text: { type: "string" } },
+			required: ["text"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "webchat_present_file",
+		label: "Present File",
+		description: "Show a file as a downloadable row in the webchat transcript. The path is relative to the webchat data dir (same root as `webchat://`), e.g. a report the agent just wrote there.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "file under the webchat data dir" },
+				name: { type: "string", description: "download name (default: the file's basename)" },
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
 ] as const;
+
+/** Raw bytes cross the wire as base64 inside one frame: keep them small enough to be lossless. */
+const MAX_PRESENT_BYTES = 8 * 1024 * 1024;
+
+const FILE_MIME: Record<string, string> = {
+	".json": "application/json",
+	".md": "text/markdown",
+	".txt": "text/plain",
+	".html": "text/html",
+	".csv": "text/csv",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".svg": "image/svg+xml",
+	".pdf": "application/pdf",
+	".zip": "application/zip",
+};
+
+function mimeFor(name: string) {
+	const dot = name.lastIndexOf(".");
+	return (dot > 0 ? FILE_MIME[name.slice(dot).toLowerCase()] : undefined) ?? "application/octet-stream";
+}
 
 function completeHostTool(id: unknown, text: string, isError = false) {
 	if (typeof id !== "string") return;
@@ -315,7 +363,44 @@ function onHostToolCall(frame: Frame) {
 		completeHostTool(frame.id, `opened ${url} in the default browser`);
 		return;
 	}
+	if (name === "webchat_copy") {
+		const text = String(args.text ?? "");
+		broadcast({ type: "wx:copy", text });
+		completeHostTool(frame.id, `copied ${text.length} characters into the browser clipboard`);
+		return;
+	}
+	if (name === "webchat_present_file") {
+		void presentFile(frame.id, args).catch((err) => completeHostTool(frame.id, `host tool failed: ${String(err)}`, true));
+		return;
+	}
 	completeHostTool(frame.id, `unknown host tool: ${name}`, true);
+}
+
+/** `webchat_present_file`: hand the browser raw bytes; it renders a download row in the transcript. */
+async function presentFile(id: unknown, args: Record<string, unknown>) {
+	const rel = typeof args.path === "string" ? args.path : "";
+	const full = dataPath(rel);
+	if (!full) {
+		completeHostTool(id, `path escapes the webchat data dir: ${rel}`, true);
+		return;
+	}
+	const name = typeof args.name === "string" && args.name.trim() ? args.name.trim() : basename(full);
+	try {
+		const info = await stat(full);
+		if (!info.isFile()) {
+			completeHostTool(id, `not a file: ${rel}`, true);
+			return;
+		}
+		if (info.size > MAX_PRESENT_BYTES) {
+			completeHostTool(id, `refusing to present ${name}: ${Math.round(info.size / 1024)} KiB is over the 8 MiB limit`, true);
+			return;
+		}
+		const bytes = await readFile(full);
+		broadcast({ type: "wx:file", name, mimeType: mimeFor(name), bytes: bytes.byteLength, data: bytes.toString("base64") });
+		completeHostTool(id, `file "${name}" (${Math.round(bytes.byteLength / 1024)} KiB) presented in the webchat transcript with a download button`);
+	} catch (err) {
+		completeHostTool(id, `cannot present ${rel}: ${String(err)}`, true);
+	}
 }
 
 /** `webchat://<path>` reads and writes text files under the plugin's data root. */
@@ -354,30 +439,64 @@ async function onHostUriRequest(frame: Frame) {
 
 // ---------------------------------------------------------------- session listing
 
-/** Canonical-cwd bucket: `-<relative>` under home, `-tmp-<relative>` under the temp root, `--<encoded>--` otherwise. */
+/**
+ * Canonical-cwd bucket, spelled exactly like the runtime spells it: `-<relative>` under home
+ * (`-` for home itself), `-tmp` for the temp root and `-tmp-<relative>` below it, and
+ * `--<encoded>--` for anything else. The separator is only added when there IS a relative
+ * part: `-tmp-` sent `/tmp` to a directory that never exists, which is what made the session
+ * list empty for a checkout under the temp root.
+ */
 function bucketFor(cwd: string) {
 	const norm = (p: string) => resolve(p).replace(/[\\/]+$/, "");
 	const enc = (p: string) => p.replace(/[\\/:]/g, "-");
+	const home = norm(homedir());
+	const temp = norm(Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp");
 	const c = norm(cwd).toLowerCase();
-	const h = norm(homedir()).toLowerCase();
-	const tmp = norm(Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp").toLowerCase();
-	if (c.startsWith(`${h}\\`) || c.startsWith(`${h}/`)) return `-${enc(norm(cwd).slice(norm(homedir()).length + 1))}`;
-	if (c.startsWith(tmp)) return `-tmp-${enc(norm(cwd).slice(norm(Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp").length + 1))}`;
+	const rel = (root: string) => {
+		const tail = norm(cwd).slice(root.length).replace(/^[\\/]+/, "");
+		return tail ? `-${enc(tail)}` : "";
+	};
+	if (c === home.toLowerCase() || c.startsWith(`${home.toLowerCase()}/`) || c.startsWith(`${home.toLowerCase()}\\`)) return `-${enc(norm(cwd).slice(home.length))}`;
+	if (c === temp.toLowerCase()) return `-tmp`;
+	if (c.startsWith(`${temp.toLowerCase()}/`) || c.startsWith(`${temp.toLowerCase()}\\`)) return `-tmp${rel(temp)}`;
 	return `--${enc(norm(cwd))}--`;
 }
 
-async function readSessionHead(path: string) {
+/** The two header lines the runtime writes, plus the first user prompt as a label fallback. */
+interface SessionHead {
+	title: string;
+	id: string;
+	cwd: string;
+	firstUser: string;
+}
+
+/**
+ * Line 1 is the padded title slot, line 2 the `type: "session"` header that records id and
+ * cwd. The cwd lookup in `listSessions` reads this header — reading it from the title line
+ * always came back empty, so the fallback could never adopt a differently spelled bucket.
+ */
+async function readSessionHead(path: string): Promise<SessionHead> {
 	const handle = await open(path, "r");
 	try {
-		const buf = Buffer.alloc(4096);
+		const buf = Buffer.alloc(16_384);
 		const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
 		const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
-		let head: Record<string, unknown> = {};
+		const head: Record<string, unknown> = {};
 		try {
 			const parsed: unknown = JSON.parse(lines[0] ?? "");
-			if (parsed && typeof parsed === "object") head = parsed as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") Object.assign(head, parsed as Record<string, unknown>);
 		} catch {
 			// header slot is a fixed-width title field in some versions; label falls back to text
+		}
+		for (const line of lines.slice(1, 8)) {
+			if (!line.startsWith('{"type":"session"')) continue;
+			try {
+				const parsed: unknown = JSON.parse(line);
+				if (parsed && typeof parsed === "object") Object.assign(head, parsed as Record<string, unknown>);
+			} catch {
+				// partial line at the read boundary
+			}
+			break;
 		}
 		let firstUser = "";
 		for (const line of lines) {
@@ -390,10 +509,15 @@ async function readSessionHead(path: string) {
 					break;
 				}
 			} catch {
-				// partial line at the 4 KiB boundary
+				// partial line at the read boundary
 			}
 		}
-		return { head, firstUser };
+		return {
+			title: typeof head.title === "string" ? head.title : "",
+			id: typeof head.id === "string" ? head.id : "",
+			cwd: typeof head.cwd === "string" ? head.cwd : "",
+			firstUser,
+		};
 	} finally {
 		await handle.close();
 	}
@@ -403,14 +527,14 @@ async function listSessions(limit: number) {
 	let dir = join(SESSIONS_ROOT, bucketFor(CWD));
 	let names = (await readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl"));
 	if (names.length === 0) {
-		// Fallback: this platform's bucket spelling may differ; adopt the bucket whose newest
-		// session header records our cwd.
+		// Fallback: a platform spelling this build does not predict (Windows temp root, a
+		// relocated home): adopt the bucket whose newest session header records our cwd.
 		for (const candidate of (await readdir(SESSIONS_ROOT).catch(() => [] as string[])).reverse()) {
 			const probe = join(SESSIONS_ROOT, candidate);
 			const files = (await readdir(probe).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl")).sort().reverse();
 			if (files.length === 0) continue;
-			const { head } = await readSessionHead(join(probe, files[0])).catch(() => ({ head: {}, firstUser: "" }));
-			if (typeof head.cwd === "string" && resolve(head.cwd) === CWD) {
+			const head = await readSessionHead(join(probe, files[0])).catch(() => null);
+			if (head?.cwd && resolve(head.cwd) === CWD) {
 				dir = probe;
 				names = files;
 				break;
@@ -422,15 +546,14 @@ async function listSessions(limit: number) {
 			const path = join(dir, name);
 			try {
 				const info = await stat(path);
-				const { head, firstUser } = await readSessionHead(path);
-				const title = typeof head.title === "string" ? head.title : "";
-				const label = title || firstUser.split("\n")[0] || "Untitled";
+				const head = await readSessionHead(path);
+				const label = head.title || head.firstUser.split("\n")[0] || "Untitled";
 				return {
 					path,
-					id: typeof head.id === "string" ? head.id : name,
+					id: head.id || name.replace(/\.jsonl$/, ""),
 					name: label.replace(/[\u0000-\u001f]/g, "").slice(0, 120),
-					firstUser: firstUser.slice(0, 300),
-					titled: Boolean(title),
+					firstUser: head.firstUser.slice(0, 300),
+					titled: Boolean(head.title),
 					bytes: info.size,
 					mtime: info.mtimeMs,
 				};
@@ -442,6 +565,47 @@ async function listSessions(limit: number) {
 	return rows.filter((row) => row !== null).sort((a, b) => b.mtime - a.mtime).slice(0, limit);
 }
 
+/** A malformed title header is the caller's fault (400); I/O failures are ours (500). */
+class SessionHeaderError extends Error {}
+
+/**
+ * Rewrite the fixed-width title header in place. Line 1 is padded to a constant byte width and
+ * every later offset (artifact paths, `fromByte` tails) depends on it, so the rewrite refills the
+ * `pad` string to the identical length — and shortens the title when it no longer fits.
+ */
+async function renameSession(path: string, name: string) {
+	const handle = await open(path, "r+");
+	try {
+		const head = Buffer.alloc(64 * 1024);
+		const { bytesRead } = await handle.read(head, 0, head.length, 0);
+		const nl = head.subarray(0, bytesRead).indexOf(0x0a);
+		if (nl < 0) throw new SessionHeaderError("session file has no header line");
+		const width = nl + 1; // the trailing newline is part of the fixed width we must reproduce
+		let header: Record<string, unknown>;
+		try {
+			const parsed: unknown = JSON.parse(head.subarray(0, nl).toString("utf8"));
+			header = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+		} catch {
+			throw new SessionHeaderError("first line is not a JSON header");
+		}
+		if (header.type !== "title") throw new SessionHeaderError("first line is not a title header");
+		// spread keeps the original key order, so only the values change on disk
+		const base = { ...header, title: name, source: "manual", updatedAt: new Date().toISOString(), pad: "" };
+		const json = (title: string) => JSON.stringify({ ...base, title });
+		const target = width - 1; // bytes of JSON text the line has room for
+		let title = name;
+		// pad is spaces, so a dropped title char buys exactly one pad char back
+		while (title && Buffer.byteLength(json(title)) > target) title = title.slice(0, -1);
+		if (!title) throw new SessionHeaderError("header line is too small for a title");
+		const line = `${JSON.stringify({ ...base, title, pad: " ".repeat(target - Buffer.byteLength(json(title))) })}\n`;
+		if (Buffer.byteLength(line) !== width) throw new Error("rename would resize the header line");
+		await handle.write(line, 0, "utf8");
+		return title;
+	} finally {
+		await handle.close();
+	}
+}
+
 // ---------------------------------------------------------------- http + ws
 
 const MIME: Record<string, string> = {
@@ -450,13 +614,74 @@ const MIME: Record<string, string> = {
 	".css": "text/css; charset=utf-8",
 	".svg": "image/svg+xml",
 	".json": "application/json; charset=utf-8",
+	".woff2": "font/woff2",
+	".woff": "font/woff",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".webp": "image/webp",
+	".ico": "image/x-icon",
+	".map": "application/json; charset=utf-8",
+	".txt": "text/plain; charset=utf-8",
+	".wasm": "application/wasm",
 };
 
+/** `web/dist` is a build output: a missing bundle is an operator problem, not a 404. */
+const MISSING_UI = `<!doctype html>
+<meta charset="utf-8">
+<title>omp-webchat: web/dist is missing</title>
+<body style="font:15px/1.6 system-ui,sans-serif;margin:12vh auto;max-width:34rem;color:#e2e8f0;background:#0f172a">
+<h1 style="font-size:1.15rem">web/dist is missing</h1>
+<p>The browser client is not built. From the plugin directory run:</p>
+<pre>cd web &amp;&amp; npm install &amp;&amp; npm run build</pre>
+<p>then reload this page.</p>
+</body>
+`;
+
+/** Map a URL path to a file under `web/dist`; only `/` and real files, no SPA catch-all. */
 function serverFile(pathname: string) {
 	const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-	if (rel.includes("..")) return null;
-	const full = join(PUBLIC_DIR, rel);
-	return full.startsWith(PUBLIC_DIR) ? full : null;
+	if (!rel || rel.includes("..")) return null;
+	const full = resolve(join(WEB_DIR, rel));
+	return full.startsWith(WEB_DIR + sep) ? full : null;
+}
+
+/** DNS-rebinding + cross-site-WebSocket defence for `/ws` and `/api/*`. */
+function guardCaller(req: Request) {
+	const { host } = splitAuthority(req.headers.get("host") ?? "");
+	if (!sameHostname(host)) return Response.json({ ok: false, error: "host not allowed" }, { status: 403 });
+	const origin = req.headers.get("origin");
+	if (!origin) return null; // no-Origin (curl, same-origin navigation) is fine when Host checks out
+	let parsed: URL;
+	try {
+		parsed = new URL(origin);
+	} catch {
+		return Response.json({ ok: false, error: "origin not allowed" }, { status: 403 });
+	}
+	if (!sameHostname(parsed.hostname) || (parsed.port && parsed.port !== String(PORT)))
+		return Response.json({ ok: false, error: "origin not allowed" }, { status: 403 });
+	return null;
+}
+
+function sameHostname(host: string) {
+	const name = host.toLowerCase();
+	// HOST is whatever we bound to (127.0.0.1 by default); loopback aliases are always allowed
+	return name === "localhost" || name === "127.0.0.1" || name === "::1" || name === "[::1]" || name === HOST.toLowerCase();
+}
+
+/** Split an authority (Host header, or URL host) into hostname and port; IPv6 literals keep their brackets. */
+function splitAuthority(value: string) {
+	const v = value.trim();
+	if (v.startsWith("[")) {
+		const end = v.indexOf("]");
+		if (end < 0) return { host: "", port: "" };
+		return { host: v.slice(0, end + 1), port: v.slice(end + 1).replace(/^:/, "") };
+	}
+	const first = v.indexOf(":");
+	const last = v.lastIndexOf(":");
+	// a colon that is not the sole one is a bare IPv6 literal, not a port separator
+	if (last < 0 || first !== last) return { host: v, port: "" };
+	return { host: v.slice(0, last), port: v.slice(last + 1) };
 }
 
 // A full restart relaunches this process while the old one still holds the port.
@@ -469,6 +694,11 @@ const server = Bun.serve<{ id: string }>({
 	idleTimeout: 255, // matches the harness gateway: long model turns must not idle out
 	async fetch(req, srv) {
 		const url = new URL(req.url);
+		// Browsers send Origin for cross-site fetches and WebSocket upgrades; the API is loopback-only.
+		if (url.pathname === "/ws" || url.pathname.startsWith("/api/")) {
+			const denied = guardCaller(req);
+			if (denied) return denied;
+		}
 		if (url.pathname === "/ws") {
 			const id = `c${Date.now().toString(36)}${clients.size}`;
 			if (srv.upgrade(req, { data: { id } })) return undefined;
@@ -487,6 +717,25 @@ const server = Bun.serve<{ id: string }>({
 			});
 		}
 		if (url.pathname === "/api/sessions") {
+			if (req.method === "PATCH") {
+				const target = resolve(url.searchParams.get("path") ?? "");
+				if (!target.startsWith(`${SESSIONS_ROOT}${sep}`) || !target.endsWith(".jsonl"))
+					return Response.json({ ok: false, error: "path is outside the session store" }, { status: 400 });
+				if (!(await stat(target).catch(() => null))?.isFile())
+					return Response.json({ ok: false, error: "no such session file" }, { status: 404 });
+				const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+				if (typeof body?.name !== "string") return Response.json({ ok: false, error: "name must be a string" }, { status: 400 });
+				// control chars would break the JSONL framing and the sidebar rendering
+				const name = body.name.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+				if (!name) return Response.json({ ok: false, error: "name must not be empty" }, { status: 400 });
+				if (name.length > 120) return Response.json({ ok: false, error: "name must be at most 120 characters" }, { status: 400 });
+				try {
+					return Response.json({ ok: true, name: await renameSession(target, name) });
+				} catch (err) {
+					const status = err instanceof SessionHeaderError ? 400 : 500;
+					return Response.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status });
+				}
+			}
 			if (req.method === "DELETE") {
 				const target = resolve(url.searchParams.get("path") ?? "");
 				if (!target.startsWith(`${SESSIONS_ROOT}${sep}`) || !target.endsWith(".jsonl"))
@@ -527,20 +776,15 @@ const server = Bun.serve<{ id: string }>({
 		const file = serverFile(url.pathname);
 		if (!file) return new Response("not found", { status: 404 });
 		const blob = Bun.file(file);
-		if (!(await blob.exists())) return new Response("not found", { status: 404 });
-		if (file.endsWith("index.html")) {
-			// Stamp asset URLs with their mtime so an edited client is never served stale.
-			const stamps = await Promise.all([stat(join(PUBLIC_DIR, "app.js")), stat(join(PUBLIC_DIR, "app.css"))]);
-			const version = String(Math.max(...stamps.map((s) => s.mtimeMs)));
-			return new Response((await blob.text()).replaceAll("__V__", version), {
-				headers: { "content-type": MIME[".html"], "cache-control": "no-store" },
-			});
-		}
+		if (!(await blob.exists()))
+			return file === INDEX_FILE
+				? new Response(MISSING_UI, { status: 503, headers: { "content-type": MIME[".html"], "cache-control": "no-store" } })
+				: new Response("not found", { status: 404 });
 		return new Response(blob, {
 			headers: {
 				"content-type": MIME[file.slice(file.lastIndexOf("."))] ?? "application/octet-stream",
-				// the client is edited in place: never let the browser serve a stale UI
-				"cache-control": "no-store",
+				// vite content-hashes everything it emits under assets/, so those may be cached forever
+				"cache-control": url.pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store",
 			},
 		});
 	},

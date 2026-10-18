@@ -8,10 +8,13 @@
     "omp-webchat": "./src/server.ts"
   },
   "omp": {
-    "extensions": ["./src/extension.ts"]
+    "extensions": [
+      "./src/extension.ts"
+    ]
   },
   "scripts": {
     "start": "bun run src/server.ts",
-    "check": "bun run src/server.ts --selftest"
+    "check": "bun run src/server.ts --selftest",
+    "build:web": "npm --prefix web install && npm --prefix web run build"
   }
 }

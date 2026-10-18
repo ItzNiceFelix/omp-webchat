@@ -10,7 +10,7 @@ instead of a re-implementation of it.
 ```
 browser  ──ws──▶  server.ts  ──stdio JSONL──▶  omp --mode rpc-ui
                      │
-                     ├─ host tools (webchat_card, webchat_open_url)
+                     ├─ host tools (webchat_card, webchat_copy, webchat_open_url, webchat_present_file)
                      ├─ webchat:// scratch files
                      └─ session list / rename / delete over the runtime's session store
 ```
@@ -20,7 +20,13 @@ browser  ──ws──▶  server.ts  ──stdio JSONL──▶  omp --mode rp
 ```bash
 # from this directory
 bun run src/server.ts --cwd /path/to/project --open      # or: BUN_BE_BUN=1 omp run src/server.ts
+
+# once, to build the browser client — the server serves web/dist as-is and never builds it
+cd web && npm install && npm run build
 ```
+
+Without `web/dist/index.html` the server answers `GET /` (and any other request for the unbuilt
+`index.html`) with a `503` that says to run that build; the WebSocket/API surface is unaffected.
 
 Flags:
 
@@ -64,6 +70,13 @@ The sidebar groups chats by age (today / yesterday / previous 7 days / older) an
 rename (`set_session_name`), delete (removes the `.jsonl` plus its artifact folder, with confirmation,
 never the active chat), and **＋ new chat** (`new_session`).
 
+Renaming the *live* session goes through `set_session_name`; any other transcript in the store is
+renamed with `PATCH /api/sessions?path=<abs .jsonl>` and a `{"name":"…"}` body (see
+[HTTP surface](#http-surface)). The server rewrites line 1 in place — `title`, `source:"manual"`,
+`updatedAt` — and refills the line's `pad` string so the header keeps its exact byte length, which is
+what keeps every later offset (artifact paths, `fromByte` tails) valid. A first line that is not a
+`{"type":"title",…}` header is refused with `400`.
+
 Resuming replays context **inside the runtime** (`switch_session`); the browser never re-sends a
 transcript to the model. Convention reference: [Open WebUI](https://docs.openwebui.com/reference/database-schema)
 groups conversations by time period and generates titles with a background model;
@@ -73,6 +86,14 @@ support rename/delete from the sidebar. A label is taken from the session title 
 otherwise from the first user message.
 
 ## UI
+
+The client is a **React app in `web/`** (vite + TypeScript, no framework beyond React), built to
+`web/dist` and served from there by the bridge as static files — `index.html` and anything else
+unhashed is sent `cache-control: no-store`, while `assets/*` keeps vite's content hash and is cached
+`immutable` for a year. Build it with `npm install && npm run build` in `web/` (CI does the same, see
+[CI](#ci)). `npm run dev` there serves the app standalone for component work: the client talks to
+`/api/*` and `/ws` on its own origin, so a full session needs the bridge (`web/dist` behind
+`server.ts`), not vite's port.
 
 Dark developer-console theme (tokens from the ui-ux-pro-max "Dark Mode (OLED)" palette, IBM Plex
 Sans + JetBrains Mono, 8px rhythm, subset of Lucide-style inline SVG icons — no emoji), laid out as
@@ -133,16 +154,58 @@ realtime-capable credential (e.g. Codex OAuth) — without one the panel shows t
 
 ### Host tools and `webchat://`
 
-The server registers two host-owned tools with `set_host_tools` and answers their calls itself:
+The server registers four host-owned tools with `set_host_tools` and answers their calls itself
+(they are listed in `GET /api/info` as `hostTools`):
 
 | Tool | Effect |
 | --- | --- |
 | `webchat_card` | renders a card (title + markdown) into the transcript |
+| `webchat_copy` | broadcasts `wx:copy`, so the browser that is connected puts `text` on the clipboard |
 | `webchat_open_url` | opens a URL in the default browser of the webchat host (http/https only) |
+| `webchat_present_file` | sends a file as a `wx:file` frame: a row with a download button in the transcript |
+
+`webchat_present_file` takes a `path` under the same data root (the `webchat://` guard applies, so
+escapes are an error result rather than a throw) and an optional `name` that defaults to the file's
+basename. It reads the bytes, base64s them into one frame, and types the download from the
+extension (`json`, `md`, `txt`, `html`, `csv`, `png`, `jpg`, `svg`, `pdf`, `zip`, else
+`application/octet-stream`). Files over 8 MiB are refused with an error result instead of a frame
+that would choke the socket.
 
 It also registers the host URI scheme `webchat://`, which reads and writes text files under
 `~/.omp/plugins/data/omp-webchat/` (path traversal rejected), so the agent can `write`/`read`
 scratch artifacts that survive the session.
+
+## HTTP surface
+
+Everything the client needs is served by the bridge itself:
+
+| Route | Meaning |
+| --- | --- |
+| `GET /` and real files under `web/dist` | the client bundle (hashed `assets/*` are `immutable`, everything else `no-store`) |
+| `GET /api/info` | resolved config: cwd, omp binary, child status, session/data roots, registered `hostTools`, bucket |
+| `GET /api/sessions?limit=<n>` | session list from the runtime's store, newest first |
+| `PATCH /api/sessions?path=<abs .jsonl>` | rename a stored session: body `{"name":"…"}`, 1–120 chars after trimming and stripping control chars; `400` if the file's first line is not a title header |
+| `DELETE /api/sessions?path=<abs .jsonl>` | delete a stored session and its artifact folder |
+| `POST /api/restart[?full=1]` | respawn the omp child, or relaunch the server itself |
+| `/ws` | the JSONL pipe: one omp child, every connected tab shares it |
+
+**Host and origin checks.** `/ws` and every `/api/*` route are loopback-only, because a page on any
+other site can still open a socket to `127.0.0.1` (DNS rebinding, cross-site WebSocket hijacking):
+
+- the `Host` header must name loopback (`localhost`, `127.0.0.1`, `::1`, `[::1]`) or exactly the
+  configured `--host` — otherwise `403 {"ok":false,"error":"host not allowed"}`;
+- a present `Origin` must pass the same hostname rule and carry no port or the listening port —
+  otherwise `403 {"ok":false,"error":"origin not allowed"}`;
+- requests without `Origin` (curl, same-origin navigation) are allowed once `Host` checks out.
+
+Static files carry no session data, so only the socket and the API are gated.
+
+## CI
+
+`.github/workflows/web.yml` builds the client on `workflow_dispatch` and on pushes/PRs that touch
+`web/**` (or the workflow itself): Node 20, `npm ci` and `npm run build` in `web/`, then `web/dist`
+is uploaded as the `omp-webchat-web-dist` artifact. `.github/workflows/android.yml` packages the
+Capacitor APK the same way.
 
 ## Notes and limits
 
@@ -156,6 +219,7 @@ scratch artifacts that survive the session.
 
 ## Files
 
-- `src/server.ts` — HTTP + WebSocket bridge, `omp --mode rpc-ui` child, host tools/URIs, session store scanner.
-- `src/public/{index.html,app.js,app.css}` — the browser client (no build step; asset URLs are stamped with their mtime).
+- `src/server.ts` — HTTP + WebSocket bridge, `omp --mode rpc-ui` child, host tools/URIs, static serving of `web/dist`, session store scanner.
+- `web/` — the React client (vite + TypeScript); `npm run build` emits `web/dist`, which is the only client the bridge serves.
 - `src/extension.ts` — `/webchat` slash command.
+- `.github/workflows/web.yml` — builds `web/` and uploads the bundle; `.github/workflows/android.yml` builds the Capacitor APK.

@@ -1,0 +1,12 @@
+{
+  "appId": "com.felix.ompwebchat",
+  "appName": "omp webchat",
+  "webDir": "www",
+  "server": {
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
