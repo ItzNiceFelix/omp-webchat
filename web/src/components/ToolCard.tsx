@@ -1,6 +1,6 @@
-import { Check, ChevronDown, ChevronRight, CircleAlert, Loader, Terminal } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Loader, Terminal } from "lucide-react";
 import { memo, useState } from "react";
-import { store } from "../useStore";
+import { store } from "../store";
 import type { ToolEntry } from "../types";
 
 function duration(entry: ToolEntry): string {
@@ -10,49 +10,59 @@ function duration(entry: ToolEntry): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function firstLine(text: string): string {
+	const line = text.split("\n").find((row) => row.trim());
+	return (line ?? "").slice(0, 240);
+}
+
 /**
- * Tool card, collapsed by default: the header carries name, intent and status, the body is
- * only mounted when the reader opens it. A running card shows its live preview line and a
- * failed card shows the first error line while collapsed.
+ * Tool card, collapsed by default and animated: the card rises in when the call starts, the
+ * chevron turns, and the body expands on a grid-rows transition (lazily mounted on first open,
+ * then kept mounted so the close animation has something to run on).
  */
 export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) {
 	const [open, setOpen] = useState(false);
+	const [mounted, setMounted] = useState(false);
 	const status = entry.status;
 	const body = entry.output ?? entry.preview ?? "";
 
+	const toggle = () => {
+		setMounted(true);
+		setOpen((previous) => !previous);
+	};
+
 	return (
-		<div className={`tool ${status}`}>
-			<button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+		<div className={`tool ${status} rise`}>
+			<button type="button" className="tool-head" aria-expanded={open} onClick={toggle}>
 				<span className="tool-icon">
 					<Terminal size={14} />
 				</span>
 				<b>{entry.name}</b>
 				{entry.intent && <span className="tool-intent">{entry.intent}</span>}
 				<span className={`status ${status}`}>
-					{status === "running" ? <Loader size={13} /> : status === "ok" ? <Check size={13} /> : <CircleAlert size={13} />}
+					{status === "running" ? <Loader size={13} className="spin" /> : status === "ok" ? <Check size={13} /> : <CircleAlert size={13} />}
 					{status}
 				</span>
 				<span className="mono">{duration(entry)}</span>
-				{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+				<ChevronRight size={15} className={`chev${open ? " open" : ""}`} />
 			</button>
 			{status === "running" && entry.preview && <div className="live-line">{firstLine(entry.preview)}</div>}
 			{status === "error" && !open && <div className="error-line">{firstLine(body) || "tool failed"}</div>}
-			{open && (
-				<div className="tool-body">
-					{entry.args !== undefined && <pre className="tool-args">{JSON.stringify(entry.args, null, 2)}</pre>}
-					<pre>{body || "(no output)"}</pre>
-					{body && (
-						<button type="button" className="show-full" onClick={() => void store.copy(body)}>
-							copy output
-						</button>
-					)}
+			{mounted && (
+				<div className={`disclosure${open ? " open" : ""}`}>
+					<div className="disclosure-inner">
+						<div className="tool-body">
+							{entry.args !== undefined && <pre className="tool-args">{JSON.stringify(entry.args, null, 2)}</pre>}
+							<pre>{body || "(no output)"}</pre>
+							{body && (
+								<button type="button" className="show-full" onClick={() => void store.copy(body)}>
+									copy output
+								</button>
+							)}
+						</div>
+					</div>
 				</div>
 			)}
 		</div>
 	);
 });
-
-function firstLine(text: string): string {
-	const line = text.split("\n").find((row) => row.trim());
-	return (line ?? "").slice(0, 240);
-}

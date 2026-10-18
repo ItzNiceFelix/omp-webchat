@@ -9,6 +9,7 @@ import { Modals } from "./components/Modals";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
 import { Transcript } from "./components/Transcript";
+import { WorkingBar } from "./components/WorkingBar";
 
 export function App() {
 	return (
@@ -18,10 +19,35 @@ export function App() {
 	);
 }
 
+/**
+ * The soft keyboard. Capacitor's Keyboard plugin resizes the WebView natively; when it does not
+ * (older Android WebViews), the visual viewport still shrinks, so the composer is lifted by the
+ * measured inset. Both cannot fight: the inset is zero once the WebView itself resized.
+ */
+function useKeyboardInset() {
+	useEffect(() => {
+		const viewport = window.visualViewport;
+		if (!viewport) return;
+		const apply = () => {
+			const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+			document.documentElement.style.setProperty("--kb", `${Math.round(inset)}px`);
+			document.documentElement.classList.toggle("keyboard-open", inset > 80);
+		};
+		apply();
+		viewport.addEventListener("resize", apply);
+		viewport.addEventListener("scroll", apply);
+		return () => {
+			viewport.removeEventListener("resize", apply);
+			viewport.removeEventListener("scroll", apply);
+		};
+	}, []);
+}
+
 function Shell() {
 	const ui = useUi();
 	const busy = useStore((select) => select.busy);
 	const statusLine = useStore((select) => select.statusLine);
+	useKeyboardInset();
 
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
@@ -35,14 +61,14 @@ function Shell() {
 	}, [ui]);
 
 	return (
-		<div className="app" data-agents={ui.agentsOpen ? "open" : "closed"}>
+		<div className="app" data-agents={ui.agentsOpen ? "open" : "closed"} data-busy={busy ? "true" : "false"}>
 			<Header />
 			<div className={`side-wrap${ui.sidebarOpen ? " open" : ""}`}>
 				<Sidebar />
 			</div>
 			{ui.sidebarOpen && <div className="sheet-backdrop" role="presentation" onClick={() => ui.setSidebarOpen(false)} />}
 			<main>
-				<div className={`busy${busy ? " on" : ""}`} role="progressbar" aria-label="agent is working" />
+				<WorkingBar />
 				<Transcript />
 				{statusLine && <div className="status-line">{statusLine}</div>}
 				<Composer />

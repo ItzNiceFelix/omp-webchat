@@ -28,6 +28,31 @@ ships with the plugin. GitHub Actions rebuilds it on every change under `web/`.
 | `src/styles.css` | the design system (tokens from the v0 design) and the responsive layout |
 | `src/fonts.ts` | bundled IBM Plex Sans + JetBrains Mono (woff2, latin subset) |
 
+## Mobile first
+
+The shell is built for a phone and widened for a desktop (`@media (min-width: 1100px)` turns the
+side panels into grid columns):
+
+- **Glass surfaces** — header, composer, sidebar, agents panel, palette and dialogs are translucent
+  with `backdrop-filter`, so streamed text stays readable behind them.
+- **Motion** — sheets slide up (from the right for agents), cards `rise` in, disclosure chevrons
+  rotate, the tool/thinking body expands on a `grid-template-rows` transition (lazily mounted,
+  then kept so closing animates too), and the streaming caret is drawn by CSS on the last block.
+  Everything is transform/opacity only and collapses under `prefers-reduced-motion`.
+- **Working indicator** — a 3 px shimmer strip plus a slow glow on the composer, instead of the
+  old flat progress bar.
+- **Context usage** — a ring + percentage beside the send button (the header drops it on narrow
+  screens); tap for tokens, window, remaining and throughput.
+- **Keyboard** — `interactive-widget=resizes-content` in the viewport meta, the Capacitor Keyboard
+  plugin (`setResizeMode("native")`) in the APK, and a `--kb` inset measured from `visualViewport`
+  (0 when the native resize already happened) that shrinks the shell so the composer is never
+  covered. `font-size: 16px` on the composer and modal inputs stops Android's focus zoom.
+- **Touch** — every control is at least 44 px, chat rename/delete stay visible where `:hover`
+  never fires, and `touch-action: manipulation` removes tap delay.
+- **Attachments** — any file type. Images go to the model as vision content; every other file is
+  uploaded to the bridge (`POST /api/upload`) and referenced in the prompt by its `webchat://`
+  URI, which the agent's `read` tool resolves.
+
 ## Notes that are easy to get wrong
 
 - **Streaming.** `message_update` frames carry either a whole partial message or one changed

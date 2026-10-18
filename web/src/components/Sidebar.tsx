@@ -27,9 +27,11 @@ function timeAgo(ms: number): string {
 export function Sidebar() {
 	const chats = useStore((select) => select.chats);
 	const query = useStore((select) => select.chatQuery);
+	const scope = useStore((select) => select.sessionScope);
+	const loading = useStore((select) => select.chatsLoading);
 	const activePath = useStore((select) => select.session?.sessionFile);
-	const session = useStore((select) => select.session);
 	const cwd = useStore((select) => select.cwd);
+	const session = useStore((select) => select.session);
 	const ompBin = useStore((select) => select.ompBin);
 	const queue = useStore((select) => select.queue);
 	const widgets = useStore((select) => select.widgets);
@@ -37,7 +39,7 @@ export function Sidebar() {
 	const ui = useUi();
 
 	const filter = query.trim().toLowerCase();
-	const rows = chats.filter((chat) => !filter || `${chat.name} ${chat.firstUser ?? ""} ${chat.id}`.toLowerCase().includes(filter));
+	const rows = chats.filter((chat) => !filter || `${chat.name} ${chat.firstUser ?? ""} ${chat.id} ${chat.folder ?? ""}`.toLowerCase().includes(filter));
 	// A brand-new session has no file on disk until its first entry lands: show it anyway.
 	if (activePath && !filter && !rows.some((chat) => chat.path === activePath))
 		rows.unshift({ path: activePath, id: "", name: session?.sessionName || "new chat", firstUser: "", mtime: Date.now(), synthetic: true });
@@ -52,23 +54,51 @@ export function Sidebar() {
 				<span>chats</span>
 				<div>
 					<button type="button" aria-label="new chat" title="New chat" onClick={() => void store.newChat()}>
-						<Plus size={16} />
+						<Plus size={17} />
 					</button>
 					<button type="button" aria-label="reload chats" title="Reload chats" onClick={() => void store.loadChats()}>
-						<RefreshCw size={15} />
+						<RefreshCw size={16} className={loading ? "spin" : undefined} />
 					</button>
 					<button type="button" className="mobile-only" aria-label="close chats" onClick={() => ui.setSidebarOpen(false)}>
-						<X size={16} />
+						<X size={17} />
 					</button>
 				</div>
 			</div>
+
+			{/* The bucket for the server's cwd is often empty (a fresh project dir): the list is
+			    most useful across every folder, so that is the default. */}
+			<div className="segmented" role="tablist" aria-label="session scope">
+				<button type="button" role="tab" aria-selected={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => store.setSessionScope("all")}>
+					all folders
+				</button>
+				<button type="button" role="tab" aria-selected={scope === "folder"} className={scope === "folder" ? "on" : ""} onClick={() => store.setSessionScope("folder")}>
+					this folder
+				</button>
+			</div>
+
 			<label className="search">
 				<Search size={14} />
 				<input value={query} placeholder="search chats…" onChange={(event) => store.setChatQuery(event.target.value)} />
 			</label>
-			{rows.length === 0 && <div className="dim">{filter ? "no match" : "no chats in this folder yet"}</div>}
+
+			{loading && !rows.length && (
+				<div className="skeleton" aria-hidden="true">
+					<i />
+					<i />
+					<i />
+					<i />
+				</div>
+			)}
+			{!loading && !rows.length && <div className="dim">{filter ? "no match" : "no chats in this scope yet"}</div>}
+
 			{rows.map((chat, index) => (
-				<ChatRowView key={chat.path} chat={chat} active={chat.path === activePath} newGroup={index === 0 || groupLabel(rows[index - 1].mtime) !== groupLabel(chat.mtime)} />
+				<ChatRowView
+					key={chat.path}
+					chat={chat}
+					active={chat.path === activePath}
+					showFolder={scope === "all"}
+					newGroup={index === 0 || groupLabel(rows[index - 1].mtime) !== groupLabel(chat.mtime)}
+				/>
 			))}
 
 			<div className="side-card">
@@ -178,7 +208,7 @@ export function Sidebar() {
 	);
 }
 
-function ChatRowView({ chat, active, newGroup }: { chat: ChatRow; active: boolean; newGroup: boolean }) {
+function ChatRowView({ chat, active, newGroup, showFolder }: { chat: ChatRow; active: boolean; newGroup: boolean; showFolder: boolean }) {
 	const ui = useUi();
 	return (
 		<>
@@ -188,7 +218,10 @@ function ChatRowView({ chat, active, newGroup }: { chat: ChatRow; active: boolea
 				title={`${chat.name}\n${chat.synthetic ? "not persisted yet" : chat.path}`}
 				onClick={() => (chat.synthetic ? undefined : void store.switchChat(chat.path))}
 			>
-				<span>{chat.name}</span>
+				<span className="chat-name">
+					{chat.name}
+					{showFolder && chat.folder && <small className="folder">{chat.folder}</small>}
+				</span>
 				<div className="chat-actions">
 					<button
 						type="button"
@@ -199,7 +232,7 @@ function ChatRowView({ chat, active, newGroup }: { chat: ChatRow; active: boolea
 							ui.openRename({ path: chat.path, name: chat.name });
 						}}
 					>
-						<Pencil size={13} />
+						<Pencil size={14} />
 					</button>
 					{!active && (
 						<button
@@ -212,7 +245,7 @@ function ChatRowView({ chat, active, newGroup }: { chat: ChatRow; active: boolea
 								ui.openDelete({ path: chat.path, name: chat.name });
 							}}
 						>
-							<Trash2 size={13} />
+							<Trash2 size={14} />
 						</button>
 					)}
 				</div>
@@ -227,7 +260,7 @@ function QueuedRow({ text, queue }: { text: string; queue: "steering" | "followU
 		<div className="queued">
 			<span className="txt">{text}</span>
 			<button type="button" title="Send next (promote to steering)" aria-label="Promote queued message" onClick={() => void store.promoteQueued(text)}>
-				<ChevronUp size={13} />
+				<ChevronUp size={14} />
 			</button>
 			<button
 				type="button"
@@ -236,11 +269,19 @@ function QueuedRow({ text, queue }: { text: string; queue: "steering" | "followU
 				onClick={() =>
 					void store.removeQueued(text, queue).then((images) => {
 						store.setDraft(text);
-						store.addDraftImages(images);
+						store.addDraftAttachments(
+							images.map((image, index) => ({
+								id: `queued-${Date.now()}-${index}`,
+								name: `queued-${index + 1}.png`,
+								size: Math.round((image.data.length * 3) / 4),
+								mimeType: image.mimeType,
+								image,
+							})),
+						);
 					})
 				}
 			>
-				<X size={13} />
+				<X size={14} />
 			</button>
 		</div>
 	);

@@ -1,19 +1,35 @@
-import { Mic, Paperclip, Send, Square } from "lucide-react";
+import { FileText, Loader, Mic, Paperclip, Send, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { asRecord, asString } from "../frames";
 import { store } from "../store";
-import type { SlashCommand } from "../types";
+import type { DraftAttachment, SlashCommand } from "../types";
 import { useStore } from "../useStore";
 import { useUi } from "../ui";
+import { ContextMeter } from "./ContextMeter";
 import { Modal } from "./Modal";
 import { Palette } from "./Palette";
 
 const PALETTE_LIMIT = 60;
 
-/** Composer: autosizing textarea, image attachments, slash palette, steer/queue while busy. */
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/**
+ * The prompt a non-image attachment becomes. The runtime's `prompt` command only accepts image
+ * content, so anything else is uploaded to the bridge's data dir and referenced by the
+ * `webchat://` host URI the agent's `read` tool can already resolve.
+ */
+function attachmentBlock(attachments: DraftAttachment[], uris: string[]): string {
+	const lines = attachments.map((attachment, index) => `${uris[index]} (${formatBytes(attachment.size)}, ${attachment.mimeType})`);
+	return `[attached files — read them with the read tool]\n${lines.join("\n")}`;
+}
+
 export function Composer() {
 	const draft = useStore((select) => select.draft);
-	const images = useStore((select) => select.draftImages);
+	const attachments = useStore((select) => select.draftAttachments);
 	const busy = useStore((select) => select.busy);
 	const commands = useStore((select) => select.commands);
 	const liveActive = useStore((select) => select.liveActive());
@@ -22,6 +38,7 @@ export function Composer() {
 	const [paletteIndex, setPaletteIndex] = useState(0);
 	const [steer, setSteer] = useState(false);
 	const [unknown, setUnknown] = useState<string | null>(null);
+	const [sending, setSending] = useState(false);
 	const area = useRef<HTMLTextAreaElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
 
@@ -47,22 +64,38 @@ export function Composer() {
 		area.current?.focus();
 	};
 
-	const addFiles = (files: FileList | null) => {
-		if (!files) return;
+	const addFiles = (files: FileList | File[]) => {
+		const plain: DraftAttachment[] = [];
 		for (const file of files) {
-			if (!file.type.startsWith("image/")) continue;
-			const reader = new FileReader();
-			reader.addEventListener("load", () => {
-				const url = String(reader.result);
-				store.addDraftImages([{ type: "image", mimeType: file.type, data: url.slice(url.indexOf(",") + 1) }]);
-			});
-			reader.readAsDataURL(file);
+			const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+			if (file.type.startsWith("image/")) {
+				const reader = new FileReader();
+				reader.addEventListener("load", () => {
+					const url = String(reader.result);
+					store.addDraftAttachments([
+						{
+							id,
+							name: file.name || "image.png",
+							size: file.size,
+							mimeType: file.type || "image/png",
+							image: { type: "image", mimeType: file.type || "image/png", data: url.slice(url.indexOf(",") + 1) },
+						},
+					]);
+				});
+				reader.readAsDataURL(file);
+				continue;
+			}
+			plain.push({ id, name: file.name || "file", size: file.size, mimeType: file.type || "application/octet-stream", file });
 		}
+		if (plain.length) store.addDraftAttachments(plain);
 	};
 
 	const send = async (skipCommandCheck = false) => {
+		if (sending) return;
 		const value = draft.trim();
-		if (!value && !images.length) return;
+		const images = attachments.flatMap((attachment) => (attachment.image ? [attachment.image] : []));
+		const files = attachments.filter((attachment) => attachment.file);
+		if (!value && !images.length && !files.length) return;
 		if (!skipCommandCheck) {
 			if (!commands.length) await store.loadCommands();
 			const match = /^\/([^\s/]+)/.exec(value);
@@ -74,9 +107,18 @@ export function Composer() {
 				return;
 			}
 		}
-		const payload = images;
-		store.clearDraft();
-		await store.sendPrompt(value, payload, busy ? (steer ? "steer" : "followUp") : undefined);
+		setSending(true);
+		try {
+			const uris: string[] = [];
+			for (const attachment of files) uris.push(await store.uploadAttachment(attachment));
+			const body = uris.length ? `${attachmentBlock(files, uris)}\n\n${value}`.trim() : value;
+			store.clearDraft();
+			await store.sendPrompt(body, images, busy ? (steer ? "steer" : "followUp") : undefined);
+		} catch (err) {
+			store.toast(`attachment failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+		} finally {
+			setSending(false);
+		}
 	};
 
 	const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -117,13 +159,23 @@ export function Composer() {
 				addFiles(event.dataTransfer.files);
 			}}
 		>
-			{images.length > 0 && (
+			{attachments.length > 0 && (
 				<div className="attachments">
-					{images.map((image, index) => (
-						<div className="att" key={`${image.mimeType}:${index}`}>
-							<img src={`data:${image.mimeType};base64,${image.data}`} alt={`attachment ${index + 1}`} />
-							<button type="button" aria-label={`remove attachment ${index + 1}`} onClick={() => store.removeDraftImage(index)}>
-								×
+					{attachments.map((attachment) => (
+						<div className={`att${attachment.image ? " image" : " file"} rise`} key={attachment.id}>
+							{attachment.image ? (
+								<img src={`data:${attachment.image.mimeType};base64,${attachment.image.data}`} alt={attachment.name} />
+							) : (
+								<span className="att-icon">
+									<FileText size={16} />
+								</span>
+							)}
+							<span className="att-meta">
+								<b>{attachment.name}</b>
+								<span>{formatBytes(attachment.size)}</span>
+							</span>
+							<button type="button" aria-label={`remove ${attachment.name}`} onClick={() => store.removeDraftAttachment(attachment.id)}>
+								<X size={13} />
 							</button>
 						</div>
 					))}
@@ -136,6 +188,7 @@ export function Composer() {
 					value={draft}
 					placeholder={busy ? "steer or queue a follow-up…" : "message omp…   (/ for commands)"}
 					rows={1}
+					enterKeyHint="send"
 					onChange={(event) => store.setDraft(event.target.value)}
 					onKeyDown={onKeyDown}
 					onPaste={(event) => {
@@ -148,18 +201,18 @@ export function Composer() {
 				/>
 				<div className="composer-tools">
 					<div>
-						<button type="button" className="icon sm" aria-label="attach images" title="Attach images" onClick={() => picker.current?.click()}>
-							<Paperclip size={16} />
+						<button type="button" className="icon" aria-label="attach files" title="Attach files (any type)" onClick={() => picker.current?.click()}>
+							<Paperclip size={17} />
 						</button>
-						<input ref={picker} className="hidden-file" type="file" accept="image/*" multiple onChange={(event) => addFiles(event.target.files)} />
+						<input ref={picker} className="hidden-file" type="file" multiple onChange={(event) => addFiles(event.target.files ?? [])} />
 						<button
 							type="button"
-							className={`icon sm${liveActive ? " active" : ""}`}
+							className={`icon${liveActive ? " active" : ""}`}
 							aria-label="live voice"
 							title="Live voice (mic and speakers on the omp host)"
 							onClick={() => void store.toggleLive()}
 						>
-							<Mic size={16} />
+							<Mic size={17} />
 						</button>
 						<button type="button" className="picker" onClick={() => ui.openModal("models")}>
 							{modelLabel(store.session)}
@@ -168,32 +221,26 @@ export function Composer() {
 							{store.session?.thinkingLevel ?? "thinking"}
 						</button>
 						{busy && (
-							<label className="steer" title="Send now instead of after the current turn">
+							<label className="steer" title="Send now instead of waiting for the current turn">
 								<input type="checkbox" checked={steer} onChange={(event) => setSteer(event.target.checked)} /> steer
 							</label>
 						)}
 					</div>
 					<div>
-						{busy ? (
-							<>
-								<button type="button" className="icon sm" aria-label="stop" title="Stop (Esc)" onClick={() => void store.abort()}>
-									<Square size={15} />
-								</button>
-								<button type="button" className="send" aria-label="queue message" title="Queue message" onClick={() => void send()}>
-									<Send size={16} />
-								</button>
-							</>
-						) : (
-							<button type="button" className="send" aria-label="send" title="Send (Enter)" onClick={() => void send()}>
-								<Send size={16} />
+						<ContextMeter />
+						{busy && (
+							<button type="button" className="icon stop" aria-label="stop" title="Stop (Esc)" onClick={() => void store.abort()}>
+								<Square size={15} />
 							</button>
 						)}
+						<button type="button" className="send" aria-label="send" title="Send (Enter)" disabled={sending} onClick={() => void send()}>
+							{sending ? <Loader size={16} className="spin" /> : <Send size={16} />}
+						</button>
 					</div>
 				</div>
 			</div>
 			<div className="hint">
-				global steer ({store.session?.isSettled === false ? "session busy" : "session settled"}) · output tokens stream per frame ·{" "}
-				{store.commands.length} commands advertised
+				{busy ? "omp is working — steer to interrupt, ■ to stop" : "streams per frame · markdown sanitized · attachments: images straight to the model, other files by uri"}
 			</div>
 			{unknown && (
 				<Modal

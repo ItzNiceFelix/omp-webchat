@@ -9,11 +9,17 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCard } from "./ToolCard";
 
 /** One content block. Kept outside the row so each block memoizes on its own props. */
-const BlockView = memo(function BlockView({ block, streaming }: { block: ContentBlock; streaming: boolean }) {
+const BlockView = memo(function BlockView({ block, streaming, caret }: { block: ContentBlock; streaming: boolean; caret?: boolean }) {
 	const record = asRecord(block);
 	switch (asString(record?.type)) {
 		case "text":
-			return <Markdown text={asString(record?.text) ?? ""} />;
+			// The streaming caret is drawn by CSS on the last block of the last paragraph, so it
+			// tracks the end of the text without another re-render per delta.
+			return (
+				<div className={`block-text${streaming && caret ? " streaming" : ""}`}>
+					<Markdown text={asString(record?.text) ?? ""} />
+				</div>
+			);
 		case "thinking":
 			return <ThinkingBlock text={asString(record?.thinking) ?? ""} streaming={streaming} />;
 		case "toolCall":
@@ -85,12 +91,14 @@ function blocksOf(message: Message): ContentBlock[] {
  */
 export const MessageRow = memo(function MessageRow({ message, streaming = false }: { message: Message; streaming?: boolean }) {
 	const blocks = blocksOf(message);
+	const lastTextIndex = blocks.reduce((last, block, index) => (asString(asRecord(block)?.type) === "text" ? index : last), -1);
+
 	if (message.local === "notice" || message.local === "error") {
 		return <article className={`message system${message.local === "error" ? " error" : ""}`}>{contentText(message.content)}</article>;
 	}
 	if (message.local === "card") {
 		return (
-			<article className="message card">
+			<article className="message card rise">
 				<h4>{message.toolName ?? "card"}</h4>
 				<div className="blocks">
 					{blocks.map((block, index) => (
@@ -102,7 +110,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	if (message.local === "btw") {
 		return (
-			<article className="message btw">
+			<article className="message btw rise">
 				<div className="who">btw side question</div>
 				<div className="blocks">
 					{blocks.map((block, index) => (
@@ -115,7 +123,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	if (message.role === "user") {
 		return (
-			<article className={`message user${message.optimistic ? " optimistic" : ""}`}>
+			<article className={`message user${message.optimistic ? " optimistic" : ""}${message.optimistic ? " send-in" : ""}`}>
 				<div className="user-bubble">
 					<div className="blocks">
 						{blocks.map((block, index) => (
@@ -135,7 +143,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	const markdown = blocks.map((block) => asString(asRecord(block)?.text) ?? "").filter(Boolean).join("\n\n");
 	return (
-		<article className="message assistant">
+		<article className={`message assistant${streaming ? " streaming" : ""}`}>
 			<div className="who">
 				omp
 				<span className="turn-actions">
@@ -147,7 +155,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 			</div>
 			<div className="blocks">
 				{blocks.map((block, index) => (
-					<BlockView key={index} block={block} streaming={streaming} />
+					<BlockView key={index} block={block} streaming={streaming} caret={index === lastTextIndex} />
 				))}
 			</div>
 			<UsageLine message={message} />

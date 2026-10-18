@@ -5,7 +5,8 @@
   "description": "Capacitor wrapper that opens the omp-webchat server (default http://127.0.0.1:7788)",
   "dependencies": {
     "@capacitor/android": "^6.2.0",
-    "@capacitor/core": "^6.2.0"
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/keyboard": "^6.0.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0"

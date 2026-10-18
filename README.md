@@ -77,6 +77,14 @@ renamed with `PATCH /api/sessions?path=<abs .jsonl>` and a `{"name":"…"}` body
 what keeps every later offset (artifact paths, `fromByte` tails) valid. A first line that is not a
 `{"type":"title",…}` header is refused with `400`.
 
+The sidebar defaults to `scope=all`, because the current folder's bucket is empty in most fresh
+project directories; the rows carry a folder label, and switching to one resumes it through
+`switch_session` exactly like a same-folder chat.
+
+Attachments: `prompt` accepts image content only, so images travel as vision content while every
+other file is uploaded first and referenced in the message text by its `webchat://` URI, which the
+agent's `read` tool resolves through the registered host URI scheme.
+
 Resuming replays context **inside the runtime** (`switch_session`); the browser never re-sends a
 transcript to the model. Convention reference: [Open WebUI](https://docs.openwebui.com/reference/database-schema)
 groups conversations by time period and generates titles with a background model;
@@ -184,6 +192,8 @@ Everything the client needs is served by the bridge itself:
 | `GET /` and real files under `web/dist` | the client bundle (hashed `assets/*` are `immutable`, everything else `no-store`) |
 | `GET /api/info` | resolved config: cwd, omp binary, child status, session/data roots, registered `hostTools`, bucket |
 | `GET /api/sessions?limit=<n>` | session list from the runtime's store, newest first |
+| `GET /api/sessions?scope=all&limit=<n>` | the same rows for **every** project folder, merged newest first, each with `bucket`, `project` (the session header's cwd) and a short `folder` label; `limit` is clamped to 500 |
+| `POST /api/upload?name=<file name>` | raw body → `uploads/<yyyyMMdd-HHmmss>-<name>` under the plugin data dir, answering `{"ok":true,"uri":"webchat://uploads/…","name","bytes","mimeType"}`; the name is sanitized to a basename and capped at 120 chars, bodies over 16 MiB are `413` |
 | `PATCH /api/sessions?path=<abs .jsonl>` | rename a stored session: body `{"name":"…"}`, 1–120 chars after trimming and stripping control chars; `400` if the file's first line is not a title header |
 | `DELETE /api/sessions?path=<abs .jsonl>` | delete a stored session and its artifact folder |
 | `POST /api/restart[?full=1]` | respawn the omp child, or relaunch the server itself |

@@ -14,12 +14,12 @@ function rowKey(message: Message): string {
 /**
  * Transcript with scroll anchoring.
  *
- * - While the reader is at the bottom, new rows and stream deltas keep it pinned there.
+ * - While the reader is at the bottom, new rows and stream deltas keep it pinned (instant: a
+ *   smooth scroll per frame fights the stream and jitters on a phone).
+ * - An animated scroll only happens when the reader asked for it — the "N new" pill, or their
+ *   own message being sent.
  * - "load earlier" prepends rows and restores the reading position by measuring one row that
- *   stays on screen (`content-visibility` makes scroll-height deltas an estimate, so an
- *   element anchor is exact where arithmetic is not).
- * - Rows arriving while the reader is scrolled away are counted in the store and surfaced as a
- *   real "N new" pill.
+ *   stays on screen, because scroll-height deltas are not exact when fonts/images settle.
  */
 export function Transcript() {
 	const messages = useStore((select) => select.messages);
@@ -28,19 +28,32 @@ export function Transcript() {
 	const pendingNew = useStore((select) => select.pendingNew);
 	const note = useStore((select) => select.transcriptNote);
 	const bottomNonce = useStore((select) => select.bottomNonce);
+	const smoothNonce = useStore((select) => select.smoothNonce);
 
 	const box = useRef<HTMLDivElement>(null);
 	const anchor = useRef<{ key: string; offset: number } | null>(null);
+	const lastSmooth = useRef(smoothNonce);
+	const frame = useRef(0);
 
 	useEffect(() => {
 		const node = box.current;
 		if (!node) return;
-		const onScroll = () => store.setAtBottom(node.scrollHeight - node.scrollTop - node.clientHeight < BOTTOM_SLACK);
+		// The scroll handler only updates the store once per frame: reading layout on every
+		// scroll event is what makes a long transcript stutter on a phone.
+		const onScroll = () => {
+			if (frame.current) return;
+			frame.current = requestAnimationFrame(() => {
+				frame.current = 0;
+				store.setAtBottom(node.scrollHeight - node.scrollTop - node.clientHeight < BOTTOM_SLACK);
+			});
+		};
 		node.addEventListener("scroll", onScroll, { passive: true });
-		return () => node.removeEventListener("scroll", onScroll);
+		return () => {
+			node.removeEventListener("scroll", onScroll);
+			if (frame.current) cancelAnimationFrame(frame.current);
+		};
 	}, []);
 
-	// Runs before paint: prepends cannot flash, and following the stream stays smooth.
 	useLayoutEffect(() => {
 		const node = box.current;
 		if (!node) return;
@@ -51,8 +64,13 @@ export function Transcript() {
 			anchor.current = null;
 			return;
 		}
+		if (smoothNonce !== lastSmooth.current) {
+			lastSmooth.current = smoothNonce;
+			node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+			return;
+		}
 		if (store.atBottom) node.scrollTop = node.scrollHeight;
-	}, [messages, streaming, start, bottomNonce]);
+	}, [messages, streaming, start, bottomNonce, smoothNonce]);
 
 	const loadEarlier = () => {
 		const node = box.current;

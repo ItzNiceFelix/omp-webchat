@@ -23,7 +23,6 @@ export function Header() {
 	const conn = useStore((select) => select.conn);
 	const child = useStore((select) => select.childStatus);
 	const sessionName = useStore((select) => select.session?.sessionName);
-	const context = useStore((select) => select.session?.contextUsage);
 	const agentCount = useStore((select) => select.subagents.size);
 	const liveActive = useStore((select) => select.liveActive());
 	const notifyPermission = useStore((select) => select.notifyPermission);
@@ -52,12 +51,6 @@ export function Header() {
 				{sessionName || "new chat"}
 			</button>
 			<span className="header-spacer" />
-			{context?.tokens !== undefined && (
-				<span className="context" title={`${context.tokens} of ${context.contextWindow ?? "?"} tokens`}>
-					{Math.round(context.tokens / 1000)}k / {Math.round((context.contextWindow ?? 0) / 1000)}k tok
-					{typeof context.percent === "number" ? ` · ${context.percent.toFixed(0)}%` : ""}
-				</span>
-			)}
 			{liveActive && <span className="conn-pill live">live voice</span>}
 			{notifyPermission !== "unsupported" && (
 				<button

@@ -27,6 +27,7 @@ import {
 import type {
 	BtwRecord,
 	ChatRow,
+	DraftAttachment,
 	ContentBlock,
 	Frame,
 	ImageContent,
@@ -118,10 +119,15 @@ export class Store {
 	pendingNew = 0;
 	/** Bumped when the reader asks to jump to the bottom, so the view can scroll without new rows. */
 	bottomNonce = 0;
+	/** Bumped when the jump should be animated (pill tap, sending a message) rather than pinned. */
+	smoothNonce = 0;
+	chatsLoading = false;
 	atBottom = true;
 	/** Composer draft. Lives here so the runtime (`set_editor_text`) and an abort can fill it. */
 	draft = "";
-	draftImages: ImageContent[] = [];
+	draftAttachments: DraftAttachment[] = [];
+	/** Which sessions the sidebar lists: only this folder's bucket, or every bucket. */
+	sessionScope: "folder" | "all" = "all";
 	notifyPermission = "default";
 
 	// ---- internals -------------------------------------------------------
@@ -244,7 +250,7 @@ export class Store {
 				void this.refreshState();
 				void this.loadChats();
 				const expected = asNumber(frame.messageCount) ?? 0;
-				if (expected > this.messages.length + (this.streaming ? 1 : 0)) void this.refreshTranscript();
+				if (expected > this.messages.length + (this.streaming ? 1 : 0)) void this.refreshTranscript("merge");
 				const last = this.lastAssistantText();
 				if (last && frame.yielded !== false) this.notifier.ping("done", "omp finished", last.slice(0, 160));
 				this.emit();
@@ -519,6 +525,7 @@ export class Store {
 		this.pendingNew = 0;
 		this.atBottom = true;
 		this.bottomNonce++;
+		this.smoothNonce++;
 		this.emit();
 	}
 
@@ -595,8 +602,12 @@ export class Store {
 	 * Full transcript, paged when the runtime supports it (a 2 000-message session does not
 	 * fit in one frame) and falling back to the monolithic snapshot when paging is refused
 	 * mid-stream. `windowSize` controls what is rendered, not what is kept.
+	 *
+	 * `replace` is for a session change, where the snapshot is authoritative. `merge` is for a
+	 * mid-session refresh: a snapshot that carries fewer rows than what is already rendered is
+	 * merged by key instead of replacing, so a partial paging answer can never empty the view.
 	 */
-	async refreshTranscript() {
+	async refreshTranscript(mode: "replace" | "merge" = "replace") {
 		const collected: Message[] = [];
 		const keys: string[] = [];
 		let cursor: string | undefined;
@@ -624,10 +635,27 @@ export class Store {
 		if (!paged) {
 			try {
 				const data = await this.client.must<{ messages?: unknown }>({ type: "get_messages" }, 180_000);
-				this.keys = [];
-				this.messages = asMessageList(data.messages);
-				for (const message of this.messages)
-					this.keys.push(`${message.role}:${message.timestamp ?? ""}:${message.toolCallId ?? ""}`);
+				const snapshot = asMessageList(data.messages);
+				const snapshotKeys = snapshot.map((message) => `${message.role}:${message.timestamp ?? ""}:${message.toolCallId ?? ""}`);
+				if (mode === "merge" && snapshot.length < this.messages.length) {
+					const at = new Map(this.keys.map((key, index) => [key, index] as const));
+					const merged = this.messages.slice();
+					const mergedKeys = this.keys.slice();
+					snapshot.forEach((message, index) => {
+						const existing = at.get(snapshotKeys[index]);
+						if (existing === undefined) {
+							mergedKeys.push(snapshotKeys[index]);
+							merged.push(message);
+							return;
+						}
+						merged[existing] = message;
+					});
+					this.messages = merged;
+					this.keys = mergedKeys;
+				} else {
+					this.messages = snapshot;
+					this.keys = snapshotKeys;
+				}
 				this.transcriptNote = "loaded as one snapshot (paging is unavailable while the session is busy)";
 			} catch (err) {
 				this.transcriptNote = `transcript unavailable: ${messageOf(err)}`;
@@ -635,24 +663,53 @@ export class Store {
 				return;
 			}
 		} else {
-			this.keys = keys;
-			this.messages = collected;
+			if (mode === "replace" || collected.length >= this.messages.length) {
+				this.keys = keys;
+				this.messages = collected;
+			} else {
+				// keep what the reader already has, refresh the rows the snapshot repeats
+				const at = new Map(this.keys.map((key, index) => [key, index] as const));
+				const merged = this.messages.slice();
+				const mergedKeys = this.keys.slice();
+				collected.forEach((message, index) => {
+					const key = keys[index];
+					const existing = at.get(key);
+					if (existing === undefined) {
+						mergedKeys.push(key);
+						merged.push(message);
+						return;
+					}
+					merged[existing] = message;
+				});
+				this.messages = merged;
+				this.keys = mergedKeys;
+			}
 			this.transcriptNote = "";
 		}
 		this.streaming = null;
-		this.tools = new Map();
+		// A merge refresh keeps live tool entries (a call may still be running) and the reader's
+		// unread counter; a full replace rebuilds from the snapshot.
+		if (mode === "replace") {
+			this.tools = new Map();
+			this.pendingNew = 0;
+		}
 		for (const message of this.messages) if (message.role === "toolResult") this.applyToolResult(message);
-		this.pendingNew = 0;
 		this.emit();
 	}
 
 	async loadChats() {
+		this.chatsLoading = true;
+		this.emit();
 		try {
-			const response = await fetch("/api/sessions?limit=100", { cache: "no-store" });
+			const query = this.sessionScope === "all" ? "?scope=all&limit=200" : "?limit=100";
+			const response = await fetch(`/api/sessions${query}`, { cache: "no-store" });
 			this.chats = asChatRows(await response.json());
 			this.emit();
 		} catch (err) {
 			this.toast(`chat list failed: ${messageOf(err)}`, "warn");
+		} finally {
+			this.chatsLoading = false;
+			this.emit();
 		}
 	}
 
@@ -679,7 +736,12 @@ export class Store {
 		const command: Frame & { type: string } = { type: "prompt", message: text };
 		if (images.length) command.images = images;
 		if (behavior) command.streamingBehavior = behavior;
-		if (!behavior && text) this.appendRow({ role: "user", optimistic: true, content: [{ type: "text", text }], timestamp: Date.now() });
+		if (!behavior && text) {
+			this.appendRow({ role: "user", optimistic: true, content: [{ type: "text", text }], timestamp: Date.now() });
+			this.atBottom = true;
+			this.smoothNonce++;
+			this.emit();
+		}
 		try {
 			let frame = await this.client.cmd(command);
 			if (frame.success === false && /already processing/i.test(String(frame.error))) {
@@ -701,8 +763,17 @@ export class Store {
 			const restored = [...(data.steering ?? []), ...(data.followUp ?? [])];
 			if (restored.length) {
 				this.draft = restored.map((message) => message.text).join("\n");
-				this.draftImages = [...this.draftImages, ...restored.flatMap((message) => message.images ?? [])];
-				this.emit();
+				this.addDraftAttachments(
+					restored.flatMap((message) =>
+						(message.images ?? []).map((image, index) => ({
+							id: `restored-${Date.now()}-${index}`,
+							name: `restored-${index + 1}.png`,
+							size: Math.round((image.data.length * 3) / 4),
+							mimeType: image.mimeType,
+							image,
+						})),
+					),
+				);
 			}
 			this.toast(restored.length ? `aborted, restored ${restored.length} queued message(s)` : "aborted", "warn");
 			return restored;
@@ -1010,21 +1081,49 @@ export class Store {
 		this.emit();
 	}
 
-	addDraftImages(images: ImageContent[]) {
-		if (!images.length) return;
-		this.draftImages = [...this.draftImages, ...images];
+	addDraftAttachments(attachments: DraftAttachment[]) {
+		if (!attachments.length) return;
+		this.draftAttachments = [...this.draftAttachments, ...attachments];
 		this.emit();
 	}
 
-	removeDraftImage(index: number) {
-		this.draftImages = this.draftImages.filter((_, position) => position !== index);
+	removeDraftAttachment(id: string) {
+		this.draftAttachments = this.draftAttachments.filter((attachment) => attachment.id !== id);
 		this.emit();
 	}
 
 	clearDraft() {
 		this.draft = "";
-		this.draftImages = [];
+		this.draftAttachments = [];
 		this.emit();
+	}
+
+	setSessionScope(scope: "folder" | "all") {
+		if (this.sessionScope === scope) return;
+		this.sessionScope = scope;
+		this.emit();
+		void this.loadChats();
+	}
+
+	/**
+	 * Uploads one attachment and returns its `webchat://` URI. The bridge stores it under the
+	 * plugin data dir, which is exactly what the registered host URI scheme reads back.
+	 */
+	async uploadAttachment(attachment: DraftAttachment): Promise<string> {
+		const file = attachment.file;
+		if (!file) throw new Error(`${attachment.name} has no file data`);
+		const response = await fetch(`/api/upload?name=${encodeURIComponent(attachment.name)}`, {
+			method: "POST",
+			headers: attachment.mimeType ? { "content-type": attachment.mimeType } : undefined,
+			body: file,
+		});
+		const data = asRecord(await response.json().catch(() => null));
+		if (data?.ok !== true) throw new Error(asString(data?.error) ?? `upload failed (${response.status})`);
+		const uri = asString(data?.uri);
+		if (!uri) throw new Error("upload returned no uri");
+		this.draftAttachments = this.draftAttachments.map((row) => (row.id === attachment.id ? { ...row, uploadedUri: uri } : row));
+		this.emit();
+		return uri;
 	}
 
 	// ---- toasts / notices ------------------------------------------------

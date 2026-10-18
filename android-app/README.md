@@ -4,8 +4,12 @@ WebView yang membuka server omp-webchat (default `http://127.0.0.1:7788`).
 Server tetap jalan di Termux/proot atau di mesin lain; app ini hanya layarnya.
 
 APK ini **tidak** membundel UI: WebView memuat `web/dist` yang disajikan oleh bridge
-(`src/server.ts`), jadi perubahan UI tidak perlu rebuild APK — cukup layar koneksi ini yang
-ikut berubah.
+(`src/server.ts`), jadi perubahan UI tidak perlu rebuild APK — kecuali kalau plugin native
+atau layar koneksi ini yang berubah.
+
+Plugin native yang dipakai: `@capacitor/keyboard` (resize mode `native`, accessory bar
+disembunyikan) supaya keyboard tidak menutupi composer dan tidak berkedip; halaman
+memanggilnya secara defensif, jadi menghapus pluginnya tidak membuat app gagal.
 
 ## Build APK (GitHub Actions)
 1. `.github/` dan `android-app/` sudah ada di root repo ini; tidak ada yang perlu disalin.

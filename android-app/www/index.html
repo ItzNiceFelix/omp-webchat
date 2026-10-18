@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#000000">
 <title>omp webchat</title>
 <style>
@@ -38,6 +38,16 @@
   </div>
 </main>
 <script>
+// Capacitor's Keyboard plugin (native, resizes the WebView so the field is never covered).
+// Called defensively: the page must still work if the plugin is absent.
+(function () {
+  const K = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Keyboard;
+  if (!K) return;
+  Promise.resolve(K.setResizeMode({ mode: "native" })).catch(function () {});
+  Promise.resolve(K.setScroll({ isDisabled: false })).catch(function () {});
+  Promise.resolve(K.setAccessoryBarVisible({ isVisible: false })).catch(function () {});
+})();
+
 const KEY = "ompwebchat.addr";
 const DEFAULT = "http://127.0.0.1:7788";
 const $ = (id) => document.getElementById(id);

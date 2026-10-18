@@ -523,15 +523,73 @@ async function readSessionHead(path: string): Promise<SessionHead> {
 	}
 }
 
+/** `.jsonl` names in one bucket directory; a missing or unreadable directory is simply empty. */
+async function jsonlNames(dir: string) {
+	return (await readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl"));
+}
+
+/** A sidebar row: the runtime's store fields plus the bucket `scope=all` clients group by. */
+interface SessionRow {
+	path: string;
+	id: string;
+	name: string;
+	firstUser: string;
+	titled: boolean;
+	bytes: number;
+	mtime: number;
+	/** the bucket directory the file lives in, spelled as the runtime spells it */
+	bucket: string;
+	/** cwd recorded in the session header — the project the chat belongs to */
+	project: string;
+	/** short label for the bucket: `-tmp` → `tmp`, a homedir-relative path shows as-is */
+	folder: string;
+}
+
+/** One session file → a sidebar row. Unreadable and vanished files come back null and are skipped. */
+async function sessionRow(dir: string, name: string): Promise<SessionRow | null> {
+	const path = join(dir, name);
+	try {
+		const info = await stat(path);
+		const head = await readSessionHead(path);
+		const label = head.title || head.firstUser.split("\n")[0] || "Untitled";
+		const bucket = basename(dir);
+		// the encoding replaces `/\:` with `-` and is not reversible, so only the marker goes;
+		// `-` on its own is the home directory, which has no relative path to show
+		const folder = bucket.replace(/^-+|-+$/g, "") || "~";
+		return {
+			path,
+			id: head.id || name.replace(/\.jsonl$/, ""),
+			name: label.replace(/[\u0000-\u001f]/g, "").slice(0, 120),
+			firstUser: head.firstUser.slice(0, 300),
+			titled: Boolean(head.title),
+			bytes: info.size,
+			mtime: info.mtimeMs,
+			bucket,
+			project: head.cwd,
+			folder,
+		};
+	} catch {
+		return null;
+	}
+}
+
+/** Every session row of one bucket directory, newest first, unreadable files dropped. */
+async function bucketRows(bucket: string) {
+	const dir = join(SESSIONS_ROOT, bucket);
+	const names = await jsonlNames(dir);
+	const rows = await Promise.all(names.map((name) => sessionRow(dir, name)));
+	return rows.filter((row) => row !== null).sort((a, b) => b.mtime - a.mtime);
+}
+
 async function listSessions(limit: number) {
 	let dir = join(SESSIONS_ROOT, bucketFor(CWD));
-	let names = (await readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl"));
+	let names = await jsonlNames(dir);
 	if (names.length === 0) {
 		// Fallback: a platform spelling this build does not predict (Windows temp root, a
 		// relocated home): adopt the bucket whose newest session header records our cwd.
 		for (const candidate of (await readdir(SESSIONS_ROOT).catch(() => [] as string[])).reverse()) {
 			const probe = join(SESSIONS_ROOT, candidate);
-			const files = (await readdir(probe).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl")).sort().reverse();
+			const files = (await jsonlNames(probe)).sort().reverse();
 			if (files.length === 0) continue;
 			const head = await readSessionHead(join(probe, files[0])).catch(() => null);
 			if (head?.cwd && resolve(head.cwd) === CWD) {
@@ -541,28 +599,14 @@ async function listSessions(limit: number) {
 			}
 		}
 	}
-	const rows = await Promise.all(
-		names.map(async (name) => {
-			const path = join(dir, name);
-			try {
-				const info = await stat(path);
-				const head = await readSessionHead(path);
-				const label = head.title || head.firstUser.split("\n")[0] || "Untitled";
-				return {
-					path,
-					id: head.id || name.replace(/\.jsonl$/, ""),
-					name: label.replace(/[\u0000-\u001f]/g, "").slice(0, 120),
-					firstUser: head.firstUser.slice(0, 300),
-					titled: Boolean(head.title),
-					bytes: info.size,
-					mtime: info.mtimeMs,
-				};
-			} catch {
-				return null;
-			}
-		}),
-	);
+	const rows = await Promise.all(names.map((name) => sessionRow(dir, name)));
 	return rows.filter((row) => row !== null).sort((a, b) => b.mtime - a.mtime).slice(0, limit);
+}
+
+/** `scope=all`: every bucket under the sessions root, not just this cwd's, merged newest first. */
+async function listAllSessions(limit: number) {
+	const buckets = await readdir(SESSIONS_ROOT).catch(() => [] as string[]);
+	return (await Promise.all(buckets.map(bucketRows))).flat().sort((a, b) => b.mtime - a.mtime).slice(0, limit);
 }
 
 /** A malformed title header is the caller's fault (400); I/O failures are ours (500). */
@@ -604,6 +648,66 @@ async function renameSession(path: string, name: string) {
 	} finally {
 		await handle.close();
 	}
+}
+
+// ---------------------------------------------------------------- uploads
+
+/** Upload bodies sit in memory, so the cap is also what a single request may cost the server. */
+const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
+
+/**
+ * A client-supplied `name` → one safe basename. Both separators are cut (a Windows-shaped
+ * `..\..\evil` must not survive as a single segment), control characters go, and a name over the
+ * 120-char cap keeps its extension so the type of the stored file still reads off its name.
+ */
+function uploadName(raw: string) {
+	const base = (raw.replace(/[\u0000-\u001f\u007f]/g, "").split(/[\\/]/).pop() ?? "").trim();
+	if (!base || /^\.+$/.test(base)) return "";
+	if (base.length <= 120) return base;
+	const dot = base.lastIndexOf(".");
+	const ext = dot > 0 && base.length - dot <= 32 ? base.slice(dot) : "";
+	return (ext ? base.slice(0, dot) : base).slice(0, 120 - ext.length) + ext;
+}
+
+/** The client's `content-type` only counts when it is a media type; else sniff the extension. */
+function uploadMime(hint: string | null, name: string) {
+	const type = (hint ?? "").split(";")[0].trim().toLowerCase();
+	return /^[a-z][a-z0-9!#$&^_.+-]*\/[a-z0-9!#$&^_.+-]+$/.test(type) ? type : mimeFor(name);
+}
+
+/**
+ * `POST /api/upload?name=<file name>`: raw body → `uploads/<yyyyMMdd-HHmmss>-<name>` under the
+ * data root. That tree is what `webchat://` resolves against, so the URI handed back is readable
+ * by the agent (and by `webchat_present_file`) with no further registration.
+ */
+async function saveUpload(req: Request, url: URL) {
+	const name = uploadName(url.searchParams.get("name") ?? "");
+	if (!name) return Response.json({ ok: false, error: "name must be a file name" }, { status: 400 });
+	// the declared length is checked first, so an oversized body is refused without buffering it
+	const declared = Number(req.headers.get("content-length") ?? 0);
+	if (declared > MAX_UPLOAD_BYTES) return Response.json({ ok: false, error: "file is larger than 16 MiB" }, { status: 413 });
+	let body: Uint8Array;
+	try {
+		body = new Uint8Array(await req.arrayBuffer());
+	} catch (err) {
+		return Response.json({ ok: false, error: String(err) }, { status: 500 });
+	}
+	// a chunked upload declares no length, so the bytes in hand are the authority
+	if (body.byteLength > MAX_UPLOAD_BYTES) return Response.json({ ok: false, error: "file is larger than 16 MiB" }, { status: 413 });
+	if (body.byteLength === 0) return Response.json({ ok: false, error: "empty body" }, { status: 400 });
+	const now = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+	const file = `${stamp}-${name}`;
+	const dest = dataPath(join("uploads", file));
+	if (!dest) return Response.json({ ok: false, error: `name escapes the uploads dir: ${name}` }, { status: 400 });
+	try {
+		await mkdir(dirname(dest), { recursive: true });
+		await writeFile(dest, body);
+	} catch (err) {
+		return Response.json({ ok: false, error: String(err) }, { status: 500 });
+	}
+	return Response.json({ ok: true, uri: `webchat://uploads/${file}`, name, bytes: body.byteLength, mimeType: uploadMime(req.headers.get("content-type"), name) });
 }
 
 // ---------------------------------------------------------------- http + ws
@@ -751,8 +855,15 @@ const server = Bun.serve<{ id: string }>({
 				}
 				return Response.json({ ok: true, deleted: target });
 			}
-			return Response.json({ sessions: await listSessions(Number(url.searchParams.get("limit") ?? 40)) });
+			// `scope=all` crosses project folders; anything else keeps the cwd-bucket surface
+			const raw = url.searchParams.get("limit");
+			if (url.searchParams.get("scope") !== "all") return Response.json({ sessions: await listSessions(Number(raw ?? 40)) });
+			const given = raw === null || raw.trim() === "" ? NaN : Number(raw);
+			// absent or unparsable means the documented 200; a given limit is clamped to 1..500
+			const limit = Number.isFinite(given) ? Math.min(Math.max(Math.trunc(given), 1), 500) : 200;
+			return Response.json({ sessions: await listAllSessions(limit) });
 		}
+		if (url.pathname === "/api/upload" && req.method === "POST") return saveUpload(req, url);
 		if (url.pathname === "/api/restart" && req.method === "POST") {
 			if (url.searchParams.get("full") === "1") {
 				// Relaunch this exact server (argv preserved) after the port is released.

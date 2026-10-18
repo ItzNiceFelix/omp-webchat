@@ -139,6 +139,25 @@ export interface ChatRow {
 	mtime: number;
 	bytes?: number;
 	synthetic?: boolean;
+	/** present when the list came from `scope=all`: which folder's bucket the row lives in */
+	bucket?: string;
+	project?: string;
+	folder?: string;
+}
+
+/** A composer attachment before sending: images go to the model as vision content, every
+ *  other file is uploaded and referenced by its `webchat://` URI. */
+export interface DraftAttachment {
+	id: string;
+	name: string;
+	size: number;
+	mimeType: string;
+	/** images only: base64 payload the runtime accepts as prompt image content */
+	image?: ImageContent;
+	/** non-images only: the raw file, uploaded on send */
+	file?: File;
+	/** upload progress for non-images */
+	uploadedUri?: string;
 }
 
 export interface SubagentRow {
