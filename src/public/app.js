@@ -185,7 +185,8 @@ function timeAgo(ms) {
 
 const waiters = new Map();
 let seq = 0;
-const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+let ws = null;
+let reconnectTimer = null; // reconnect attempts are tracked on the socket (see connectSocket)
 
 function cmd(command, timeoutMs = 120000) {
 	const id = `${state.clientId}:${++seq}`;
@@ -200,6 +201,12 @@ function cmd(command, timeoutMs = 120000) {
 			if (frame.type === "wx:dead") reject(new Error("omp process is gone"));
 			else resolve(frame);
 		});
+		if (!ws || ws.readyState !== WebSocket.OPEN) {
+			clearTimeout(timer);
+			waiters.delete(id);
+			reject(new Error("not connected"));
+			return;
+		}
 		ws.send(JSON.stringify(payload));
 	});
 }
@@ -216,24 +223,39 @@ function notify(message, level = "error") {
 	appendSystemRow(String(message), level === "error" ? "error" : "system");
 }
 
-ws.addEventListener("open", () => {
-	state.connected = true;
-	$("conn").className = "dot mid";
-});
-ws.addEventListener("close", () => {
-	state.connected = false;
-	$("conn").className = "dot";
-	appendSystemRow("websocket closed — reload to reconnect", "error");
-});
-ws.addEventListener("message", (ev) => {
-	let frame;
-	try {
-		frame = JSON.parse(ev.data);
-	} catch {
-		return;
-	}
-	onFrame(frame);
-});
+/** Survives a bridge restart: reconnect with backoff and re-bootstrap on `wx:hello`. */
+function connectSocket() {
+	clearTimeout(reconnectTimer);
+	ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+	ws.addEventListener("open", () => {
+		state.connected = true;
+		setConn("starting");
+	});
+	ws.addEventListener("close", () => {
+		const wasConnected = state.connected;
+		state.connected = false;
+		state.clientId = null;
+		setConn("exited");
+		for (const [id, waiter] of waiters) {
+			waiters.delete(id);
+			waiter({ type: "wx:dead" });
+		}
+		if (wasConnected) appendSystemRow("connection to the webchat server lost — reconnecting…", "system");
+		reconnectTimer = setTimeout(connectSocket, 1500);
+	});
+	ws.addEventListener("error", () => {
+		// the close handler owns recovery
+	});
+	ws.addEventListener("message", (ev) => {
+		let frame;
+		try {
+			frame = JSON.parse(ev.data);
+		} catch {
+			return;
+		}
+		onFrame(frame);
+	});
+}
 
 function setConn(status) {
 	$("conn").className = `dot ${status === "running" ? "on" : status === "starting" ? "mid" : ""}`;
@@ -2345,3 +2367,4 @@ $("warmingBtn").addEventListener("click", async () => {
 loadNotifyPrefs();
 renderHeader();
 renderWelcome();
+connectSocket();
