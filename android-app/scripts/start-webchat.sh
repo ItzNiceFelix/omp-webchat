@@ -15,6 +15,7 @@
 #   DISTRO=ubuntu                  # alias proot-distro; default: dideteksi otomatis
 #   OMP_WEBCHAT_PORT=7789          # default 7788
 #   OMP_WEBCHAT_SERVER=/root/.../server.ts
+#   OMP_WEBCHAT_OMP=/root/.local/bin/omp   # biner omp di dalam distro
 #   OMP_WEBCHAT_PROJECT=/root/xyz  # sama dengan argumen pertama
 set -u
 
@@ -28,6 +29,8 @@ PD_DIR="$PREFIX_DIR/var/lib/proot-distro"
 LEGACY_DIR="$PD_DIR/installed-rootfs" # layout lama: <alias>/ adalah rootfs-nya
 CONTAINER_DIR="$PD_DIR/containers"    # layout baru: <alias>/rootfs adalah rootfs-nya
 SERVER_CANDIDATES="/root/.omp/plugins/node_modules/omp-webchat/src/server.ts /root/omp-webchat/src/server.ts"
+OMP_CANDIDATES="/root/.local/bin/omp /usr/local/bin/omp /usr/bin/omp"
+BASE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 say() { printf '%s\n' "$*"; }
 die() {
@@ -102,14 +105,43 @@ if [ -z "$SERVER" ] && [ -n "$ROOTFS" ]; then
 	done
 fi
 [ -n "$SERVER" ] || SERVER="/root/.omp/plugins/node_modules/omp-webchat/src/server.ts"
+
+if [ -z "${OMP_WEBCHAT_OMP:-}" ]; then
+	OMP_BIN=""
+	if [ -n "$ROOTFS" ]; then
+		for candidate in $OMP_CANDIDATES; do
+			if [ -x "$ROOTFS$candidate" ]; then
+				OMP_BIN="$candidate"
+				break
+			fi
+		done
+	fi
+	OMP_BIN="${OMP_BIN:-omp}"
+else
+	OMP_BIN="$OMP_WEBCHAT_OMP"
+fi
+
 [ -n "$LOGIN" ] || LOGIN="proot-distro login $DISTRO -- bash -lc"
-CMD="BUN_BE_BUN=1 omp run '$SERVER' --cwd $PROJECT --port $PORT"
+# `bash -lc` is a login, non-interactive shell: it never reads ~/.bashrc, where the guest puts
+# $HOME/.local/bin on PATH. So omp is called by absolute path, and PATH is set explicitly
+# because the bridge itself looks up `omp` on PATH when it respawns the runtime child.
+case "$OMP_BIN" in
+/*)
+	OMP_DIR="$(dirname "$OMP_BIN")"
+	CMD="PATH=$OMP_DIR:$BASE_PATH BUN_BE_BUN=1 $OMP_BIN run '$SERVER' --cwd $PROJECT --port $PORT"
+	;;
+*)
+	# Tidak ditemukan di rootfs: serahkan ke PATH bawaan login shell.
+	CMD="BUN_BE_BUN=1 $OMP_BIN run '$SERVER' --cwd $PROJECT --port $PORT"
+	;;
+esac
 
 if [ -n "${OMP_WEBCHAT_DRY_RUN:-}" ]; then
 	say "project  $PROJECT"
 	say "rootfs   ${ROOTFS:-'(tidak ditemukan)'}"
 	say "login    $LOGIN"
 	say "server   $SERVER"
+	say "omp      $OMP_BIN"
 	say "perintah: $LOGIN \"$CMD\""
 	exit 0
 fi
@@ -125,6 +157,7 @@ say "server   http://127.0.0.1:$PORT"
 say "project  $PROJECT"
 say "login    $LOGIN"
 say "server.ts $SERVER"
+say "omp      $OMP_BIN"
 say "Buka app omp-webchat sekarang. Jangan tutup sesi Termux ini; Ctrl+C untuk berhenti."
 
 # LOGIN berakhir dengan shell yang menerima "-lc <cmd>", jadi perintah server jadi argumen terakhir.
