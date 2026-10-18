@@ -119,6 +119,34 @@ function blocksToNodes(blocks, container) {
 	for (const [i, block] of (blocks ?? []).entries()) container.append(blockNode(block, i));
 }
 
+/** Three animated bars, used wherever the agent is visibly working. */
+function typingDots() {
+	const box = el("span", "typing");
+	box.setAttribute("aria-hidden", "true");
+	box.append(el("i"), el("i"), el("i"));
+	return box;
+}
+
+/**
+ * Streamed assistant text: markdown is re-rendered at most once per frame, with a timer
+ * fallback because `requestAnimationFrame` is paused in background/hidden tabs — streaming
+ * must keep landing even when nobody is looking at the page.
+ */
+function streamText(node, text) {
+	node.dataset.streamText = text;
+	if (node.dataset.streamQueued) return;
+	node.dataset.streamQueued = "1";
+	const flush = () => {
+		if (!node.dataset.streamQueued) return;
+		delete node.dataset.streamQueued;
+		clearTimeout(Number(node.dataset.streamTimer || 0));
+		delete node.dataset.streamTimer;
+		node.innerHTML = `${md(node.dataset.streamText ?? "")}<span class="caret" aria-hidden="true"></span>`;
+	};
+	node.dataset.streamTimer = String(setTimeout(flush, 120));
+	requestAnimationFrame(flush);
+}
+
 function blockNode(block, index) {
 	if (block?.type === "text") {
 		const div = el("div");
@@ -486,10 +514,13 @@ function onMessageUpdate(frame) {
 		cur.blocks.set(index, node);
 		cur.node.querySelector(".blocks").append(node);
 	} else if (block.type === "text") {
-		node.innerHTML = md(block.text ?? "");
+		streamText(node, block.text ?? "");
 	} else if (block.type === "thinking") {
-		node.querySelector(".body").textContent = block.thinking ?? "";
+		const body = node.querySelector(".body");
+		body.textContent = block.thinking ?? "";
 		node.classList.add("streaming");
+		const summary = node.querySelector("summary");
+		if (!summary.querySelector(".typing")) summary.append(typingDots());
 	} else if (block.type === "toolCall") {
 		const partial = block.partialArgs ?? (block.arguments ? JSON.stringify(block.arguments, null, 2) : "");
 		if (partial) node.querySelector(".args").textContent = partial;
@@ -768,11 +799,15 @@ function renderHeader() {
 	$("stopBtn").disabled = !state.busy;
 	$("main").classList.toggle("busy", state.busy);
 	$("sendBtn").setAttribute("aria-label", state.busy && $("steerBox").checked ? "Steer the running turn" : state.busy ? "Queue message" : "Send message");
-	$("hint").textContent = state.busy
+	const hint = $("hint");
+	hint.replaceChildren();
+	const busyText = state.busy
 		? `${$("steerBox").checked ? "steering" : "queueing"} · Esc to stop`
 		: s.isSettled === false
 			? "background work pending"
 			: "";
+	if (state.busy) hint.append(typingDots(), document.createTextNode(busyText));
+	else hint.textContent = busyText;
 	const meta = $("sessionMeta");
 	meta.replaceChildren();
 	const rows = [
@@ -780,7 +815,7 @@ function renderHeader() {
 		["session", s.sessionFile ? s.sessionFile.split(/[\\/]/).pop() : "–"],
 		["messages", String(s.messageCount ?? state.messages.length)],
 		["model", s.model?.id ?? "–"],
-		["effort", `${s.thinkingLevel ?? "?"}${s.fastModeActive ? " · fast" : ""}${s.slowModeSupported && s.slowModeEnabled ? " · slow" : ""}`],
+		["effort", `${s.thinkingLevel ?? "auto"}${s.fastModeActive ? " · fast" : ""}${s.slowModeSupported && s.slowModeEnabled ? " · slow" : ""}`],
 	];
 	if (state.stats) rows.push(["tokens", `${state.stats.tokens?.total ?? 0} · $${Number(state.stats.cost ?? 0).toFixed(4)}`]);
 	if (s.usageLimit)
@@ -1773,6 +1808,8 @@ function presentNextUIRequest() {
 // ---------------------------------------------------------------- popovers
 
 let popoverAnchor = null;
+let popoverWidth = 380;
+const TOUCH_ONLY = () => matchMedia("(hover: none) and (pointer: coarse)").matches;
 
 function closePopover() {
 	const box = $("popover");
@@ -1781,6 +1818,31 @@ function closePopover() {
 	box.replaceChildren();
 	popoverAnchor?.setAttribute("aria-expanded", "false");
 	popoverAnchor = null;
+}
+
+/** Keep an open picker anchored to its trigger across keyboard/viewport resizes. */
+function positionPopover() {
+	const box = $("popover");
+	if (!popoverAnchor || box.classList.contains("hidden")) return;
+	const vv = window.visualViewport;
+	const viewW = vv?.width ?? window.innerWidth;
+	const viewH = vv?.height ?? window.innerHeight;
+	const offX = vv?.offsetLeft ?? 0;
+	const offY = vv?.offsetTop ?? 0;
+	const width = Math.max(200, Math.min(popoverWidth, viewW - 16));
+	box.style.width = `${width}px`;
+	const anchor = popoverAnchor.getBoundingClientRect();
+	const spaceAbove = anchor.top - offY - 12;
+	const spaceBelow = offY + viewH - anchor.bottom - 12;
+	// Prefer opening upward (composer sits at the bottom), but never off-screen.
+	const placeAbove = spaceAbove >= Math.min(260, Math.max(spaceBelow, 0));
+	const available = Math.max(160, Math.min(placeAbove ? spaceAbove : spaceBelow, viewH - 24));
+	box.style.maxHeight = `${available}px`;
+	const height = box.offsetHeight;
+	const left = Math.min(Math.max(offX + 8, anchor.left), offX + viewW - width - 8);
+	const top = placeAbove ? anchor.top - height - 10 : anchor.bottom + 10;
+	box.style.left = `${left}px`;
+	box.style.top = `${Math.max(offY + 8, Math.min(top, offY + viewH - height - 8))}px`;
 }
 
 /** Anchored picker above its trigger (the composer row sits at the bottom of the viewport). */
@@ -1800,7 +1862,7 @@ function openPickerPopover(anchor, { title, placeholder, items, onPick, width })
 	const paint = (filter) => {
 		list.replaceChildren();
 		const rows = items.filter((it) => !filter || `${it.label} ${it.sub ?? ""} ${it.hint ?? ""}`.toLowerCase().includes(filter)).slice(0, 400);
-		if (!rows.length) list.append(el("div", "opt dim", "no match"));
+		if (!rows.length) list.append(el("div", "opt dim", items.length ? "no match" : "loading…"));
 		for (const it of rows) {
 			const row = el("div", "opt");
 			row.append(el("span", null, it.label));
@@ -1816,35 +1878,47 @@ function openPickerPopover(anchor, { title, placeholder, items, onPick, width })
 	input.addEventListener("input", () => paint(input.value.toLowerCase()));
 	paint("");
 	box.classList.remove("hidden");
-	const w = Math.max(240, Math.min(width ?? 380, window.innerWidth - 16));
-	box.style.width = `${w}px`;
-	const h = box.offsetHeight;
-	const r = anchor.getBoundingClientRect();
-	const left = Math.min(Math.max(8, r.left - 8), window.innerWidth - w - 8);
-	const above = r.top - h - 10;
-	box.style.left = `${left}px`;
-	box.style.top = `${Math.max(8, above)}px`;
+	popoverWidth = width ?? 380;
+	positionPopover();
+	// Second pass after layout/scrollbar settle: the first measurement can be pre-layout.
+	requestAnimationFrame(() => positionPopover());
 	anchor.setAttribute("aria-expanded", "true");
 	popoverAnchor = anchor;
-	input.focus();
+	// On narrow/touch screens never summon the soft keyboard: it would reflow the picker.
+	if (!TOUCH_ONLY() && window.innerWidth > 900) input.focus();
+	else list.querySelector(".opt")?.scrollIntoView({ block: "nearest" });
 }
 
-function showModelPicker(anchor) {
-	openPickerPopover(anchor, {
-		title: "model",
-		placeholder: "filter models…",
-		width: 460,
-		items: state.models.map((m) => ({ label: m.id, sub: m.name ?? "", hint: m.provider, value: m })),
-		onPick: async (item) => {
-			try {
-				await must({ type: "set_model", provider: item.value.provider, modelId: item.value.id });
-				await refreshState();
-				toast(`model → ${item.value.id}`, "info");
-			} catch (err) {
-				notify(`model switch failed: ${err.message ?? err}`);
-			}
-		},
-	});
+async function showModelPicker(anchor) {
+	const open = () =>
+		openPickerPopover(anchor, {
+			title: "model",
+			placeholder: "filter models…",
+			width: 460,
+			items: state.models.map((m) => ({ label: m.id, sub: m.name ?? "", hint: m.provider, value: m })),
+			onPick: async (item) => {
+				try {
+					await must({ type: "set_model", provider: item.value.provider, modelId: item.value.id });
+					await refreshState();
+					toast(`model → ${item.value.id}`, "info");
+				} catch (err) {
+					notify(`model switch failed: ${err.message ?? err}`);
+				}
+			},
+		});
+	if (state.models.length) {
+		open();
+		return;
+	}
+	// First tap before discovery finished: show the picker immediately, then fill it in.
+	open();
+	try {
+		const data = await must({ type: "get_available_models" });
+		state.models = data?.models ?? [];
+	} catch (err) {
+		notify(`model list failed: ${err.message ?? err}`);
+	}
+	if (popoverAnchor === anchor) open();
 }
 
 function showEffortPicker(anchor) {
@@ -2203,14 +2277,18 @@ document.addEventListener("keydown", (ev) => {
 	}
 });
 
-// keep the drawer/sidebar honest across breakpoints
-window.addEventListener("resize", () => {
-	closePopover();
+// Viewport/keyboard changes reposition an open picker instead of dismissing it.
+const onViewportChange = () => {
+	if (popoverAnchor) positionPopover();
 	if (window.innerWidth > 900) {
 		toggleSidebar(false);
 		backdrop(state.drawer.open);
 	}
-});
+};
+window.addEventListener("resize", onViewportChange);
+window.addEventListener("orientationchange", onViewportChange);
+window.visualViewport?.addEventListener("resize", onViewportChange);
+window.visualViewport?.addEventListener("scroll", onViewportChange);
 
 $("sendBtn").addEventListener("click", () => void submit());
 $("stopBtn").addEventListener("click", () => void abort());
@@ -2221,8 +2299,20 @@ $("refreshChatsBtn").addEventListener("click", () => void loadChats());
 $("chatSearch").addEventListener("input", () => renderChats());
 $("sessionBtn").addEventListener("click", () => showSessions());
 $("commandsBtn").addEventListener("click", () => showCommands());
-$("modelBtn").addEventListener("click", (ev) => showModelPicker(ev.currentTarget));
-$("thinkingBtn").addEventListener("click", (ev) => showEffortPicker(ev.currentTarget));
+$("modelBtn").addEventListener("click", (ev) => {
+	if (popoverAnchor === ev.currentTarget) {
+		closePopover();
+		return;
+	}
+	showModelPicker(ev.currentTarget);
+});
+$("thinkingBtn").addEventListener("click", (ev) => {
+	if (popoverAnchor === ev.currentTarget) {
+		closePopover();
+		return;
+	}
+	showEffortPicker(ev.currentTarget);
+});
 $("btwBtn").addEventListener("click", () => {
 	closePopover();
 	showBtw();
@@ -2281,6 +2371,13 @@ document.addEventListener("click", (ev) => {
 	if (!pop.classList.contains("hidden") && !pop.contains(ev.target) && !popoverAnchor?.contains(ev.target)) closePopover();
 });
 $("scroll").addEventListener("scroll", () => closePopover(), { passive: true });
+// Tapping the anchor again closes; a tap inside the popover (or on the filter input) must not.
+document.addEventListener("pointerdown", (ev) => {
+	const pop = $("popover");
+	if (pop.classList.contains("hidden")) return;
+	if (pop.contains(ev.target) || popoverAnchor?.contains(ev.target)) return;
+	closePopover();
+});
 
 $("sidebarToggle").addEventListener("click", () => toggleSidebar());
 $("backdrop").addEventListener("click", () => {

@@ -461,7 +461,7 @@ details.thinking.streaming > summary { background: linear-gradient(90deg, transp
 
 /* tool cards */
 .toolWrap { margin-bottom: var(--s-2); }
-.tool { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.tool { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; animation: rise 200ms var(--ease) both; }
 .tool .head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3); background: var(--card-2); }
 .tool .tname { color: var(--info); font: 600 12.5px/1 var(--font-mono); }
 .tool .tintent { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -582,25 +582,28 @@ details.thinking.streaming > summary { background: linear-gradient(90deg, transp
 /* ---------------------------------------------------------------- popovers + menus */
 
 .popover {
-	position: absolute;
+	position: fixed;
 	z-index: 30;
-	min-width: 240px;
-	max-width: min(420px, 92vw);
+	min-width: 200px;
+	max-width: min(460px, calc(100vw - 16px));
 	background: var(--card);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--r-md);
 	box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
 	padding: var(--s-2);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 	animation: rise 140ms var(--ease) both;
 }
-#moreMenu { top: calc(var(--hdr-h) + 4px); right: var(--s-3); }
+#popover .list { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+#moreMenu { top: calc(var(--hdr-h) + 4px); right: var(--s-3); max-height: calc(100dvh - var(--hdr-h) - 16px); }
 .menu-row { display: flex; align-items: center; gap: var(--s-2); width: 100%; min-height: 38px; padding: 0 var(--s-2); border-radius: var(--r-sm); color: var(--fg); text-align: left; }
 .menu-row:hover { background: var(--card-2); }
 .menu-row .lbl { flex: 1; }
 .menu-row .state { color: var(--faint); font: 500 11px/1 var(--font-mono); }
 .menu-row[aria-checked="true"] { color: var(--accent); }
 .menu-row[aria-checked="true"] .state { color: var(--accent); }
-#popover .list { max-height: 46dvh; overflow-y: auto; }
 #popover .opt { display: flex; align-items: baseline; gap: var(--s-2); padding: 7px var(--s-2); border-radius: var(--r-sm); cursor: pointer; }
 #popover .opt:hover, #popover .opt.sel { background: var(--card-2); }
 #popover .opt .sub { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
@@ -668,12 +671,19 @@ details.thinking.streaming > summary { background: linear-gradient(90deg, transp
 	.only-mobile { display: inline-flex !important; }
 	.brand-name { display: none; }
 	#ctx, #tps { display: none; }
-	.chip { max-width: 42vw; min-height: 36px; }
-	#sessionBtn { max-width: 46vw; }
-	#agentsBtn { max-width: 32vw; }
-	.icon-btn { width: 40px; height: 40px; }
+	#hdr { gap: 6px; padding: 0 var(--s-2); overflow-x: hidden; }
+	#hdr > * { flex: 0 0 auto; }
+	#sessionBtn { flex: 1 1 auto; min-width: 0; max-width: none; min-height: 34px; }
+	#agentsBtn { max-width: 40vw; min-height: 34px; }
+	.chip { min-height: 34px; max-width: 40vw; }
+	.icon-btn { width: 36px; height: 36px; }
 	.chatRow { min-height: 44px; }
 	.chatRow .acts .icon-btn { width: 34px; height: 34px; }
+	/* touch: comfortable rows, no hover-only affordances */
+	#popover .opt, #modal .opt, .menu-row { min-height: 44px; }
+	#popover { min-width: 0; }
+	#moreMenu { left: var(--s-2); right: var(--s-2); }
+	#chatList { max-height: 46vh; }
 	#side, #agentsDrawer {
 		position: fixed;
 		top: var(--hdr-h);
@@ -716,4 +726,12 @@ details.thinking.streaming > summary { background: linear-gradient(90deg, transp
 
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+/* Coarse pointers: 44px minimum tap targets everywhere, hover-only chrome always visible. */
+@media (hover: none) and (pointer: coarse) {
+	.icon-btn { width: 40px; height: 40px; }
+	.chatRow { min-height: 48px; }
+	#popover .opt, #modal .opt, .menu-row { min-height: 46px; }
+	.composer-tools .chip.sm { min-height: 34px; }
 }
