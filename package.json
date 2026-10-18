@@ -1,6 +1,6 @@
 {
   "name": "omp-webchat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Localhost browser chat for omp sessions, backed by `omp --mode rpc`",
   "type": "module",
