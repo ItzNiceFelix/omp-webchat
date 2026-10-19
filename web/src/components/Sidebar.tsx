@@ -1,4 +1,4 @@
-import { ChevronUp, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { BrainCircuit, ChevronUp, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { store, taskMark } from "../store";
 import { useStore } from "../useStore";
 import { useUi } from "../ui";
@@ -6,6 +6,12 @@ import type { ChatRow } from "../types";
 import { LiveCard } from "./LiveCard";
 
 const DAY_MS = 86_400_000;
+
+/** Same two endpoints the header used to carry; they live beside the process they restart. */
+async function restart(full: boolean) {
+	const response = await fetch(`/api/restart${full ? "?full=1" : ""}`, { method: "POST" }).catch(() => null);
+	if (!response?.ok) store.toast("restart request failed", "error");
+}
 
 function groupLabel(ms: number): string {
 	const now = new Date();
@@ -50,17 +56,25 @@ export function Sidebar() {
 
 	return (
 		<aside className="sidebar">
+			<div className="side-brand">
+				<span className="brand-mark" aria-hidden="true">
+					<BrainCircuit size={14} />
+				</span>
+				omp webchat
+				<small>RPC</small>
+			</div>
+			<button type="button" className="new-chat" onClick={() => void store.newChat()}>
+				<Plus size={15} /> New chat
+				<kbd>⌘N</kbd>
+			</button>
 			<div className="side-head">
 				<span>chats</span>
 				<div>
-					<button type="button" aria-label="new chat" title="New chat" onClick={() => void store.newChat()}>
-						<Plus size={17} />
-					</button>
 					<button type="button" aria-label="reload chats" title="Reload chats" onClick={() => void store.loadChats()}>
-						<RefreshCw size={16} className={loading ? "spin" : undefined} />
+						<RefreshCw size={15} className={loading ? "spin" : undefined} />
 					</button>
 					<button type="button" className="mobile-only" aria-label="close chats" onClick={() => ui.setSidebarOpen(false)}>
-						<X size={17} />
+						<X size={16} />
 					</button>
 				</div>
 			</div>
@@ -122,6 +136,14 @@ export function Sidebar() {
 					<dt>session</dt>
 					<dd title={session?.sessionFile ?? ""}>{session?.sessionFile?.split("/").pop() ?? "not persisted yet"}</dd>
 				</dl>
+				<div className="side-actions">
+					<button type="button" onClick={() => void restart(false)} title="Restart the omp child process">
+						<RefreshCw size={12} /> omp
+					</button>
+					<button type="button" onClick={() => void restart(true)} title="Restart the whole server">
+						<Power size={12} /> server
+					</button>
+				</div>
 			</div>
 
 			{todoPhases.length > 0 && (

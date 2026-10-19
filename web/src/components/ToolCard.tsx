@@ -52,8 +52,18 @@ export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) 
 				<div className={`disclosure${open ? " open" : ""}`}>
 					<div className="disclosure-inner">
 						<div className="tool-body">
-							{entry.args !== undefined && <pre className="tool-args">{JSON.stringify(entry.args, null, 2)}</pre>}
-							<pre>{body || "(no output)"}</pre>
+							<div className="tool-cols">
+								{entry.args !== undefined && (
+									<div>
+										<div className="col-label">arguments</div>
+										<pre className="tool-args">{JSON.stringify(entry.args, null, 2)}</pre>
+									</div>
+								)}
+								<div>
+									<div className="col-label">{status === "running" ? "stream" : "output"}</div>
+									<pre>{body || "(no output)"}</pre>
+								</div>
+							</div>
 							{body && (
 								<button type="button" className="show-full" onClick={() => void store.copy(body)}>
 									copy output

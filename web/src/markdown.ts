@@ -58,6 +58,19 @@ function harden(html: string): string {
 	}
 	// Colour is applied by walking text nodes: no string is ever re-parsed as HTML.
 	highlightCode(template.content);
+	for (const pre of template.content.querySelectorAll("pre")) {
+		const shell = document.createElement("div");
+		shell.className = "code-block";
+		const head = document.createElement("div");
+		head.className = "code-head";
+		const copy = document.createElement("button");
+		copy.type = "button";
+		copy.className = "code-copy";
+		copy.textContent = "copy";
+		head.append(copy);
+		pre.replaceWith(shell);
+		shell.append(head, pre);
+	}
 	for (const image of template.content.querySelectorAll("img")) {
 		const src = image.getAttribute("src") ?? "";
 		// Remote images leak the reader's IP to whoever wrote the markdown; keep data: only.

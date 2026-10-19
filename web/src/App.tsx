@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "./useStore";
 import { UiProvider, useUi } from "./ui";
 import { AgentsPanel } from "./components/AgentsPanel";
@@ -17,6 +17,22 @@ export function App() {
 			<Shell />
 		</UiProvider>
 	);
+}
+
+/**
+ * A media query as reactive state. `matchMedia` is what actually tells a phone apart from a
+ * narrow desktop window; `innerWidth` does not.
+ */
+function useMedia(query: string): boolean {
+	const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+	useEffect(() => {
+		const list = window.matchMedia(query);
+		const update = () => setMatches(list.matches);
+		update();
+		list.addEventListener("change", update);
+		return () => list.removeEventListener("change", update);
+	}, [query]);
+	return matches;
 }
 
 /**
@@ -47,6 +63,7 @@ function Shell() {
 	const ui = useUi();
 	const busy = useStore((select) => select.busy);
 	const statusLine = useStore((select) => select.statusLine);
+	const touch = useMedia("(pointer: coarse)") || navigator.maxTouchPoints > 0;
 	useKeyboardInset();
 
 	useEffect(() => {
@@ -61,7 +78,15 @@ function Shell() {
 	}, [ui]);
 
 	return (
-		<div className="app" data-agents={ui.agentsOpen ? "open" : "closed"} data-busy={busy ? "true" : "false"}>
+		<div
+			className="app"
+			data-agents={ui.agentsOpen ? "open" : "closed"}
+			data-busy={busy ? "true" : "false"}
+			// Pointer capability, not a width breakpoint: a phone-width window on a desktop still
+			// wants compact rows, and the APK always wants finger-sized ones. Media queries for
+			// `hover`/`pointer` are not emulated by every WebView, this is.
+			data-touch={touch ? "true" : "false"}
+		>
 			<Header />
 			<div className={`side-wrap${ui.sidebarOpen ? " open" : ""}`}>
 				<Sidebar />

@@ -25,30 +25,33 @@ ships with the plugin. GitHub Actions rebuilds it on every change under `web/`.
 | `src/useStore.ts` | `useSyncExternalStore` binding; components subscribe to one slice |
 | `src/markdown.ts` | `marked` → DOMPurify, plus an LRU so an unchanged block is never re-parsed |
 | `src/components/` | header, sidebar, transcript, message rows, tool cards, composer, palette, agents, dialogs, modals, live voice, toasts |
-| `src/styles.css` | the design system (tokens from the v0 design) and the responsive layout |
-| `src/fonts.ts` | bundled IBM Plex Sans + JetBrains Mono (woff2, latin subset) |
+| `src/styles.css` | the design system (Stitch surface/cyan/violet tokens) and the responsive layout |
+| `src/fonts.ts` | bundled Geist + Inter (variable) and JetBrains Mono (woff2) |
 
 ## Mobile first
 
 The shell is built for a phone and widened for a desktop (`@media (min-width: 1100px)` turns the
 side panels into grid columns):
 
-- **Glass surfaces** — header, composer, sidebar, agents panel, palette and dialogs are translucent
-  with `backdrop-filter`, so streamed text stays readable behind them.
+- **Glass surfaces** — only the fixed chrome (header, composer, modal backdrop) uses
+  `backdrop-filter`; the transcript is opaque, because a blurred layer inside the scrolling list is
+  the dominant scroll cost on a phone.
 - **Motion** — sheets slide up (from the right for agents), cards `rise` in, disclosure chevrons
   rotate, the tool/thinking body expands on a `grid-template-rows` transition (lazily mounted,
   then kept so closing animates too), and the streaming caret is drawn by CSS on the last block.
   Everything is transform/opacity only and collapses under `prefers-reduced-motion`.
-- **Working indicator** — a 3 px shimmer strip plus a slow glow on the composer, instead of the
-  old flat progress bar.
-- **Context usage** — a ring + percentage beside the send button (the header drops it on narrow
-  screens); tap for tokens, window, remaining and throughput.
+- **Working indicator** — a 2 px aurora strip plus a masked conic aurora border on the composer,
+  driven by `data-busy` and animated only while a turn runs.
+- **Context usage** — a ring + percentage beside the send button; tap for tokens, window,
+  remaining and throughput. The header shows the model and thinking pills, and the composer's quick
+  strip shows the free context buffer.
 - **Keyboard** — `interactive-widget=resizes-content` in the viewport meta, the Capacitor Keyboard
   plugin (`setResizeMode("native")`) in the APK, and a `--kb` inset measured from `visualViewport`
   (0 when the native resize already happened) that shrinks the shell so the composer is never
   covered. `font-size: 16px` on the composer and modal inputs stops Android's focus zoom.
-- **Touch** — every control is at least 44 px, chat rename/delete stay visible where `:hover`
-  never fires, and `touch-action: manipulation` removes tap delay.
+- **Touch** — `data-touch` on the app root (from `pointer: coarse` or `maxTouchPoints`, since some
+  WebViews report neither media query) raises every control to a 40 px target, chat rename/delete
+  stay visible where `:hover` never fires, and `touch-action: manipulation` removes tap delay.
 - **Attachments** — any file type. Images go to the model as vision content; every other file is
   uploaded to the bridge (`POST /api/upload`) and referenced in the prompt by its `webchat://`
   URI, which the agent's `read` tool resolves.

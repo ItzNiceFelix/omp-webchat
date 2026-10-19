@@ -1,4 +1,5 @@
-import { Bell, Menu, Power, RefreshCw, Users } from "lucide-react";
+import { Bell, BrainCircuit, Menu, Users } from "lucide-react";
+import { asRecord, asString } from "../frames";
 import { store } from "../store";
 import { useStore } from "../useStore";
 import { useUi } from "../ui";
@@ -18,21 +19,23 @@ function statusText(conn: string, child: string): string {
 	return child === "exited" ? "omp exited" : "disconnected";
 }
 
-/** Header: connection state, session, agents, live voice, process controls. */
+/** Header: connection state, the two runtime settings worth reaching anywhere, agents. */
 export function Header() {
 	const conn = useStore((select) => select.conn);
 	const child = useStore((select) => select.childStatus);
-	const sessionName = useStore((select) => select.session?.sessionName);
+	const session = useStore((select) => select.session);
 	const agentCount = useStore((select) => select.subagents.size);
 	const liveActive = useStore((select) => select.liveActive());
 	const notifyPermission = useStore((select) => select.notifyPermission);
 	const ui = useUi();
 
 	const label = statusText(conn, child);
-	const restart = async (full: boolean) => {
-		const response = await fetch(`/api/restart${full ? "?full=1" : ""}`, { method: "POST" }).catch(() => null);
-		if (!response?.ok) store.toast("restart request failed", "error");
-	};
+	const fullId = asString(asRecord(session?.model)?.id) ?? "model";
+	const modelProvider = asString(asRecord(session?.model)?.provider) ?? "";
+	// The runtime reports provider-qualified ids; the pill only has room for the model itself.
+	const modelId = fullId.split("/").pop() ?? fullId;
+	const window = session?.contextUsage?.contextWindow;
+	const windowLabel = window ? (window >= 1_000_000 ? `${Math.round(window / 1_000_000)}M` : `${Math.round(window / 1000)}k`) : null;
 
 	return (
 		<header>
@@ -40,18 +43,30 @@ export function Header() {
 				<Menu size={17} />
 			</button>
 			<span className="brand">
+				<span className="brand-mark" aria-hidden="true">
+					<BrainCircuit size={15} />
+				</span>
 				omp<span> webchat</span>
 			</span>
 			{/* Real connection state: the bridge socket plus the child process it drives. */}
 			<span className={`conn-pill ${conn}`} title={STATUS_LABEL[label] ?? label}>
 				<span className={`conn ${conn}`} />
-				{label}
+				<span className="conn-label">{label}</span>
 			</span>
-			<button type="button" className="session" onClick={() => ui.openModal("sessions")} title="Switch session">
-				{sessionName || "new chat"}
-			</button>
 			<span className="header-spacer" />
 			{liveActive && <span className="conn-pill live">live voice</span>}
+			<button type="button" className="model-pill" onClick={() => ui.openModal("models")} title={modelProvider ? `${modelProvider}/${fullId}` : fullId}>
+				<span className="dot" />
+				<span className="model-name">{modelId}</span>
+				{windowLabel && <span className="pill-badge">{windowLabel}</span>}
+			</button>
+			<button type="button" className="thinking-pill" onClick={() => ui.openModal("thinking")} title="Thinking level">
+				<BrainCircuit size={12} />
+				{session?.thinkingLevel ?? "thinking"}
+			</button>
+			<button type="button" className="session" onClick={() => ui.openModal("sessions")} title="Switch session">
+				{session?.sessionName || "new chat"}
+			</button>
 			{notifyPermission !== "unsupported" && (
 				<button
 					type="button"
@@ -61,7 +76,7 @@ export function Header() {
 						void store.requestNotifications().then((permission) => store.toast(`notifications: ${permission}`, permission === "granted" ? "info" : "warn"))
 					}
 				>
-					<Bell size={16} />
+					<Bell size={15} />
 				</button>
 			)}
 			<button
@@ -71,13 +86,7 @@ export function Header() {
 				title="Subagents and their live transcripts"
 				onClick={() => ui.setAgentsOpen(!ui.agentsOpen)}
 			>
-				<Users size={15} /> {agentCount} agent{agentCount === 1 ? "" : "s"}
-			</button>
-			<button type="button" className="icon sm restart" title="Restart the omp child process" onClick={() => void restart(false)}>
-				<RefreshCw size={16} />
-			</button>
-			<button type="button" className="icon sm restart" title="Restart the whole server" onClick={() => void restart(true)}>
-				<Power size={16} />
+				<Users size={14} /> {agentCount}
 			</button>
 		</header>
 	);

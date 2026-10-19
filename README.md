@@ -103,38 +103,42 @@ unhashed is sent `cache-control: no-store`, while `assets/*` keeps vite's conten
 `/api/*` and `/ws` on its own origin, so a full session needs the bridge (`web/dist` behind
 `server.ts`), not vite's port.
 
-Dark developer-console theme (tokens from the ui-ux-pro-max "Dark Mode (OLED)" palette, IBM Plex
-Sans + JetBrains Mono, 8px rhythm, subset of Lucide-style inline SVG icons — no emoji), laid out as
-header / sidebar / chat / agents drawer.
+Dark console theme on the Stitch surface scale (surface-container-lowest → highest), cyan as the
+live accent and violet for reasoning, Geist Variable + Inter Variable + JetBrains Mono (all bundled
+as woff2, no font CDN), laid out as header / sidebar / chat / agents drawer.
 
 - **Layout** — only the chat scrolls: the composer and the sidebar never move, and the page itself
   has no scrollbar (`min-height: 0` grid tracks, `overflow: hidden` shell).
-- **Transcript** — user bubbles right-aligned, assistant turns with streamed thinking, markdown with
-  colored code (comments/strings/numbers/keywords/calls), colored inline spans (code, `/commands`,
-  `@mentions`, file paths, links) and per-turn usage.
-- **Tool cards** — args (collapsible), live status pill, spinner + pulsing outline while running,
-  partial output during the run, full result after; failures tinted red.
-- **Motion** — indeterminate top bar while the agent works, shimmer on streaming thinking, blinking
-  caret mid-stream, rise-in for new rows; all compositor-only (`transform`/`opacity`) and disabled
-  under `prefers-reduced-motion`.
-- **Composer** — single rounded box with the standard AI-chat toolbar: attach image, live voice,
-  model picker, reasoning effort, command palette, steer toggle, stop, send. `Enter` sends,
-  `Shift+Enter` newline, `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens
-  the palette (arrows + `Tab` to pick), images can be pasted or dropped.
-- **Header** — connection dot, session name, context/tokens, agents counter, notification bell, and a
-  "more" menu (fast, slow, auto-compaction, cache warming, `/btw`, export transcript, restart).
-- **Chats sidebar** — grouped by age (today / yesterday / previous 7 days / older), search, rename,
-  delete (with confirmation, never the active chat), **＋ new chat**, active-chat marker. Below it:
-  session facts, todo card (`0/3 done` count announced via `role="status"`), queued chips with
-  promote/remove, goal, live-voice meters, extension widgets.
+- **Transcript** — user turns carry a name/time label above a right-aligned bubble; assistant turns
+  open with a mark, a `streaming` pill and the copy actions; markdown renders colored code inside a
+  shell with its own `copy` button (delegated, since the HTML comes from sanitized markdown) and
+  per-turn usage.
+- **Tool cards** — header carries name, intent, status pill and duration; the body is a two-column
+  grid (arguments | output/stream) from 700px, one column on a phone.
+- **Motion** — indeterminate aurora top bar while the agent works, a masked conic aurora border on
+  the composer while `data-busy="true"`, rise-in for new rows, pulsing stream orb; all
+  compositor-only (`transform`/`opacity`) and disabled under `prefers-reduced-motion`.
+- **Composer** — quick strip (working/ready, context buffer, live voice) over a single rounded box
+  with attach, live voice, steer, context ring, stop and send. `Enter` sends, `Shift+Enter` newline,
+  `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens the palette (arrows +
+  `Tab` to pick), images can be pasted or dropped.
+- **Header** — connection pill, model pill (tap to switch), thinking pill, session name, notification
+  bell, agents counter. The process restart buttons live in the sidebar's session card, beside the
+  process they restart.
+- **Chats sidebar** — brand, **New chat**, grouped by age (today / yesterday / previous 7 days /
+  older), search, rename, delete (with confirmation, never the active chat), active-chat marker.
+  Below it: session facts + restart, todo card, queued chips with promote/remove, goal, live-voice
+  meters, extension widgets.
 - **Agents drawer** — roster with status, agent, model, tokens, elapsed, current assignment; click a
   row (or the inline card under its `task` call) to tail that agent's JSONL transcript in place
   (`get_subagent_messages` with `fromByte`), plus steer/kill and a live-tail toggle.
 - **Dialogs** — the `ask` tool, tool approvals, and any `select`/`confirm`/`input`/`editor` request
   render as modals; `notify` shows a toast, `setStatus`/`setWidget`/`set_editor_text`/`open_url` are honored.
-- **Responsive** — under 900px the sidebar and agents drawer become slide-over sheets with a
-  backdrop (`Esc` closes), header meta collapses, chat rows and icon buttons grow to ≥40px, and the
-  composer respects `env(safe-area-inset-bottom)`.
+- **Responsive** — under 1100px the sidebar and agents drawer become slide-over sheets with a
+  backdrop (`Esc` closes); the header drops the wordmark at 420px; `data-touch` (from
+  `pointer: coarse` / `maxTouchPoints`) raises every control to a 40px target, including row
+  actions that would otherwise depend on `:hover`; the composer respects
+  `env(safe-area-inset-bottom)`.
 - **Scrollbars** — thin, dark, borderless thumbs that brighten on hover (`scrollbar-width`/`::-webkit-scrollbar`).
 
 ### Notifications

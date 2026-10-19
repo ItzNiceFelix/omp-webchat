@@ -1,4 +1,4 @@
-import { Check, Copy, FileCode2, Terminal } from "lucide-react";
+import { Check, Copy, Sparkles, Terminal } from "lucide-react";
 import { memo, useState } from "react";
 import { asNumber, asRecord, asString } from "../frames";
 import { contentText, store } from "../store";
@@ -85,6 +85,12 @@ function blocksOf(message: Message): ContentBlock[] {
 	return Array.isArray(message.content) ? message.content : [{ type: "text", text: String(message.content ?? "") }];
 }
 
+/** Wall-clock time of a turn, in the reader's locale; nothing when the runtime omitted it. */
+function clock(timestamp: number | undefined): string {
+	if (!timestamp) return "";
+	return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 /**
  * Memoized transcript row: a message object is replaced only when that entry changes, so a
  * stream delta re-renders exactly one row and finished rows keep their parsed markdown.
@@ -124,6 +130,11 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	if (message.role === "user") {
 		return (
 			<article className={`message user${message.optimistic ? " optimistic" : ""}${message.optimistic ? " send-in" : ""}`}>
+				<div className="turn-meta">
+					<b>You</b>
+					<span>·</span>
+					<span>{clock(message.timestamp)}</span>
+				</div>
 				<div className="user-bubble">
 					<div className="blocks">
 						{blocks.map((block, index) => (
@@ -145,12 +156,19 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	return (
 		<article className={`message assistant${streaming ? " streaming" : ""}`}>
 			<div className="who">
-				omp
+				<span className="assistant-mark" aria-hidden="true">
+					<Sparkles size={12} />
+				</span>
+				<span className="who-name">omp</span>
+				{streaming && (
+					<span className="stream-pill">
+						<span className="orb" />
+						streaming
+					</span>
+				)}
 				<span className="turn-actions">
 					<CopyButton text={contentText(message.content)} />
-					<span className="copy-sep">
-						<CopyButton text={markdown} label="Copy as markdown" />
-					</span>
+					<CopyButton text={markdown} label="Copy as markdown" />
 				</span>
 			</div>
 			<div className="blocks">
@@ -162,5 +180,3 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 		</article>
 	);
 });
-
-export const FileIcon = ({ name }: { name: string }) => (name.endsWith(".ts") || name.endsWith(".tsx") ? <FileCode2 size={15} /> : <Terminal size={15} />);

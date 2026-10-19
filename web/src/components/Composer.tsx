@@ -1,10 +1,8 @@
 import { FileText, Loader, Mic, Paperclip, Send, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { asRecord, asString } from "../frames";
 import { store } from "../store";
 import type { DraftAttachment, SlashCommand } from "../types";
 import { useStore } from "../useStore";
-import { useUi } from "../ui";
 import { ContextMeter } from "./ContextMeter";
 import { Modal } from "./Modal";
 import { Palette } from "./Palette";
@@ -33,7 +31,6 @@ export function Composer() {
 	const busy = useStore((select) => select.busy);
 	const commands = useStore((select) => select.commands);
 	const liveActive = useStore((select) => select.liveActive());
-	const ui = useUi();
 
 	const [paletteIndex, setPaletteIndex] = useState(0);
 	const [steer, setSteer] = useState(false);
@@ -41,6 +38,9 @@ export function Composer() {
 	const [sending, setSending] = useState(false);
 	const area = useRef<HTMLTextAreaElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
+	const usage = useStore((select) => select.session?.contextUsage);
+	const buffer =
+		usage?.contextWindow && typeof usage.tokens === "number" ? `${Math.max(0, Math.round((usage.contextWindow - usage.tokens) / 1000))}k` : null;
 
 	const paletteMatch = /^\/(\S*)$/.exec(draft.trimStart());
 	const paletteItems = paletteMatch
@@ -159,6 +159,22 @@ export function Composer() {
 				addFiles(event.dataTransfer.files);
 			}}
 		>
+			<div className="quick">
+				{busy ? (
+					<span className="quick-pill working">
+						<span className="orb" />
+						working
+					</span>
+				) : (
+					<span className="quick-pill">ready</span>
+				)}
+				{buffer && (
+					<span className="quick-pill" title="Tokens still free in the model's context window">
+						buffer · {buffer} free
+					</span>
+				)}
+				{liveActive && <span className="quick-pill thinking">live voice</span>}
+			</div>
 			{attachments.length > 0 && (
 				<div className="attachments">
 					{attachments.map((attachment) => (
@@ -214,12 +230,6 @@ export function Composer() {
 						>
 							<Mic size={17} />
 						</button>
-						<button type="button" className="picker" onClick={() => ui.openModal("models")}>
-							{modelLabel(store.session)}
-						</button>
-						<button type="button" className="picker" onClick={() => ui.openModal("thinking")}>
-							{store.session?.thinkingLevel ?? "thinking"}
-						</button>
 						{busy && (
 							<label className="steer" title="Send now instead of waiting for the current turn">
 								<input type="checkbox" checked={steer} onChange={(event) => setSteer(event.target.checked)} /> steer
@@ -273,11 +283,4 @@ export function Composer() {
 			)}
 		</div>
 	);
-}
-
-function modelLabel(session: { model?: { provider?: string; id?: string } } | null): string {
-	const provider = asString(asRecord(session?.model)?.provider);
-	const id = asString(asRecord(session?.model)?.id);
-	if (!id) return "model";
-	return provider ? `${provider}/${id}` : id;
 }
