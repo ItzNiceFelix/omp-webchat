@@ -116,6 +116,8 @@ export interface SessionState {
 	thinkingLevel?: string;
 	isStreaming?: boolean;
 	isCompacting?: boolean;
+	/** `get_state.autoCompactionEnabled`: whether maintenance may summarize history on its own. */
+	autoCompactionEnabled?: boolean;
 	isSettled?: boolean;
 	sessionFile?: string;
 	sessionId?: string;

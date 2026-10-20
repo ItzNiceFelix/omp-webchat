@@ -60,7 +60,13 @@ export function Header() {
 				<span className="model-name">{modelId}</span>
 				{windowLabel && <span className="pill-badge">{windowLabel}</span>}
 			</button>
-			<button type="button" className="thinking-pill" onClick={() => ui.openModal("thinking")} title="Thinking level">
+			<button
+				type="button"
+				className="thinking-pill"
+				onClick={() => ui.openModal("thinking")}
+				title={`Thinking level: ${session?.thinkingLevel ?? "default"} — auto-compaction ${session?.autoCompactionEnabled === false ? "off" : "on"}`}
+				aria-label={`Reasoning settings, thinking level ${session?.thinkingLevel ?? "default"}`}
+			>
 				<BrainCircuit size={12} />
 				{session?.thinkingLevel ?? "thinking"}
 			</button>

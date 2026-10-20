@@ -101,13 +101,27 @@ function ThinkingModal() {
 	const ui = useUi();
 	const levels = useStore((select) => select.levels);
 	const current = useStore((select) => select.session?.thinkingLevel);
+	const auto = useStore((select) => select.session?.autoCompactionEnabled);
+	const [pending, setPending] = useState(false);
 
 	useEffect(() => {
 		void store.loadLevels();
 	}, []);
 
+	// Older runtimes omit the field: the switch stays hidden rather than lying about the state.
+	const known = typeof auto === "boolean";
+
+	const toggleAuto = () => {
+		if (!known || pending) return;
+		setPending(true);
+		void store
+			.setAutoCompaction(!auto)
+			.catch((err: Error) => store.toast(`auto-compaction failed: ${err.message}`, "error"))
+			.finally(() => setPending(false));
+	};
+
 	return (
-		<Modal title="thinking level" onClose={ui.closeModal}>
+		<Modal title="reasoning" onClose={ui.closeModal}>
 			<OptionList
 				items={(levels.length ? levels : FALLBACK_LEVELS).map((level) => ({ label: level, value: level }))}
 				selected={(item) => item.value === current}
@@ -116,6 +130,17 @@ function ThinkingModal() {
 					void store.setThinkingLevel(item.value).catch((err: Error) => store.toast(`thinking level failed: ${err.message}`, "error"));
 				}}
 			/>
+			{known && (
+				<button type="button" className="switch-row" role="switch" aria-checked={auto} disabled={pending} onClick={toggleAuto}>
+					<span>
+						<b>auto-compaction</b>
+						<small>summarize older history when the context fills up</small>
+					</span>
+					<span className={`switch${auto ? " on" : ""}`} aria-hidden="true">
+						<i />
+					</span>
+				</button>
+			)}
 		</Modal>
 	);
 }

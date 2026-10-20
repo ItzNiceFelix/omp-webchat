@@ -118,13 +118,20 @@ as woff2, no font CDN), laid out as header / sidebar / chat / agents drawer.
 - **Motion** — indeterminate aurora top bar while the agent works, a masked conic aurora border on
   the composer while `data-busy="true"`, rise-in for new rows, pulsing stream orb; all
   compositor-only (`transform`/`opacity`) and disabled under `prefers-reduced-motion`.
-- **Composer** — quick strip (working/ready, context buffer, live voice) over a single rounded box
-  with attach, live voice, steer, context ring, stop and send. `Enter` sends, `Shift+Enter` newline,
-  `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens the palette (arrows +
-  `Tab` to pick), images can be pasted or dropped.
+- **Composer** — quick strip (working/ready, context buffer, reasoning, live voice) over a single
+  rounded box with attach, live voice, steer, context ring, stop and send. `Enter` sends,
+  `Shift+Enter` newline, `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens
+  the palette (arrows + `Tab` to pick), images can be pasted or dropped. Under 1100px the header's
+  reasoning pill is hidden, so the strip carries it there (with a `no compact` tag while
+  auto-compaction is off); under 420px the context-buffer pill drops out because the context ring
+  already reports the same number.
 - **Header** — connection pill, model pill (tap to switch), thinking pill, session name, notification
   bell, agents counter. The process restart buttons live in the sidebar's session card, beside the
   process they restart.
+- **Reasoning modal** — `thinking level` plus an `auto-compaction` switch. The switch sends
+  `set_auto_compaction` (`get_state.autoCompactionEnabled` reads it back), so it is session-scoped
+  and nothing is written to `config.yml`; the row stays hidden on runtimes that do not report the
+  field.
 - **Chats sidebar** — brand, **New chat**, grouped by age (today / yesterday / previous 7 days /
   older), search, rename, delete (with confirmation, never the active chat), active-chat marker.
   Below it: session facts + restart, todo card, queued chips with promote/remove, goal, live-voice

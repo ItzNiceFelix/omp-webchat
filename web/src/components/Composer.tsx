@@ -1,7 +1,8 @@
-import { FileText, Loader, Mic, Paperclip, Send, Square, X } from "lucide-react";
+import { BrainCircuit, FileText, Loader, Mic, Paperclip, Send, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { store } from "../store";
 import type { DraftAttachment, SlashCommand } from "../types";
+import { useUi } from "../ui";
 import { useStore } from "../useStore";
 import { ContextMeter } from "./ContextMeter";
 import { Modal } from "./Modal";
@@ -39,6 +40,9 @@ export function Composer() {
 	const area = useRef<HTMLTextAreaElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
 	const usage = useStore((select) => select.session?.contextUsage);
+	const level = useStore((select) => select.session?.thinkingLevel);
+	const autoCompaction = useStore((select) => select.session?.autoCompactionEnabled);
+	const ui = useUi();
 	const buffer =
 		usage?.contextWindow && typeof usage.tokens === "number" ? `${Math.max(0, Math.round((usage.contextWindow - usage.tokens) / 1000))}k` : null;
 
@@ -169,10 +173,16 @@ export function Composer() {
 					<span className="quick-pill">ready</span>
 				)}
 				{buffer && (
-					<span className="quick-pill" title="Tokens still free in the model's context window">
+					<span className="quick-pill buffer" title="Tokens still free in the model's context window">
 						buffer · {buffer} free
 					</span>
 				)}
+				{/* The header pill is hidden below 1100px, so the composer carries the same entry. */}
+				<button type="button" className="quick-pill reasoning" onClick={() => ui.openModal("thinking")} title="Reasoning level and auto-compaction">
+					<BrainCircuit size={11} />
+					{level ?? "thinking"}
+					{autoCompaction === false && <span className="off-tag">no compact</span>}
+				</button>
 				{liveActive && <span className="quick-pill thinking">live voice</span>}
 			</div>
 			{attachments.length > 0 && (

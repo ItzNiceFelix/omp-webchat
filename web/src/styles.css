@@ -1925,6 +1925,21 @@ main {
 	background: var(--cyan-soft);
 }
 
+/* The header's thinking pill is hidden below 1100px; the strip takes over from there. */
+.quick-pill.reasoning {
+	display: none;
+	color: var(--violet);
+	background: var(--violet-soft);
+	border-color: rgba(222, 183, 255, 0.22);
+}
+
+.quick-pill.reasoning .off-tag {
+	padding-left: 6px;
+	border-left: 1px solid rgba(222, 183, 255, 0.25);
+	color: var(--amber);
+	font-size: 9.5px;
+}
+
 .quick-pill .orb {
 	position: relative;
 	width: 5px;
@@ -2488,6 +2503,77 @@ main {
 	color: var(--faint);
 }
 
+/* a settings row that is a toggle rather than a choice: label left, switch right */
+.switch-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	min-height: 52px;
+	padding: 9px 11px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--surface-2);
+	color: var(--muted);
+	text-align: left;
+}
+
+.switch-row:hover {
+	background: var(--surface-3);
+	color: var(--text);
+}
+
+.switch-row:disabled {
+	opacity: 0.6;
+}
+
+.switch-row b {
+	display: block;
+	font: 500 11.5px var(--mono);
+	color: var(--text);
+}
+
+.switch-row small {
+	display: block;
+	margin-top: 2px;
+	font-size: 10.5px;
+	color: var(--faint);
+}
+
+.switch {
+	position: relative;
+	flex-shrink: 0;
+	width: 38px;
+	height: 22px;
+	border-radius: 999px;
+	background: var(--surface-4);
+	border: 1px solid var(--line-strong);
+	transition: background 0.15s ease;
+}
+
+.switch i {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--muted);
+	transition: transform 0.15s ease;
+}
+
+.switch.on {
+	background: var(--cyan-soft);
+	border-color: rgba(0, 242, 254, 0.5);
+}
+
+.switch.on i {
+	transform: translateX(16px);
+	background: var(--cyan);
+	box-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+}
+
 .q {
 	display: grid;
 	gap: 6px;
@@ -2639,6 +2725,11 @@ main {
 		display: none;
 	}
 
+	/* the reasoning level is a header pill only from 1100px; the composer strip carries it here */
+	.quick-pill.reasoning {
+		display: inline-flex;
+	}
+
 	.side-wrap {
 		position: fixed;
 		z-index: 10;
@@ -2717,6 +2808,12 @@ main {
 
 	.quick {
 		margin-bottom: 5px;
+	}
+
+	/* the context ring in the composer already carries this number; the strip keeps the
+	   reasoning pill fully visible instead of scrolling it out of view */
+	.quick-pill.buffer {
+		display: none;
 	}
 }
 

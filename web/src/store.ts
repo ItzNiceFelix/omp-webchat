@@ -831,6 +831,12 @@ export class Store {
 		await this.refreshState();
 	}
 
+	/** `set_auto_compaction` is session-scoped: nothing is written to config.yml. */
+	async setAutoCompaction(enabled: boolean) {
+		await this.client.must({ type: "set_auto_compaction", enabled });
+		await this.refreshState();
+	}
+
 	async btw(question: string) {
 		await this.client.must({ type: "btw", question });
 	}
