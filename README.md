@@ -28,6 +28,23 @@ cd web && npm install && npm run build
 Without `web/dist/index.html` the server answers `GET /` (and any other request for the unbuilt
 `index.html`) with a `503` that says to run that build; the WebSocket/API surface is unaffected.
 
+### Start / stop
+
+`scripts/webchat.sh` wraps the spawn so the bridge survives the terminal that launched it, and
+`scripts/webchat.cmd` is the double-click shim (Git Bash, argument forwarded):
+
+```bash
+bash scripts/webchat.sh start     # start if needed, wait for the port, open the browser
+bash scripts/webchat.sh stop      # stop the server and its omp child (also kills a foreign listener)
+bash scripts/webchat.sh restart
+bash scripts/webchat.sh status    # exit 1 when nothing answers
+```
+
+`start` is idempotent. The detached child writes `.run/webchat.log` and `.run/webchat.err.log`
+(gitignored), and its PID lands in `.run/webchat.pid`; `stop` falls back to whatever PID is
+listening on the port, so a server started by hand is stopped too. On Windows the desktop
+shortcuts `omp webchat` and `omp webchat (stop)` call the shim with `start` / `stop`.
+
 Flags:
 
 | Flag | Meaning |

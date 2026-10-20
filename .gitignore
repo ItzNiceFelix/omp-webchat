@@ -8,3 +8,6 @@ android-app/node_modules/
 
 # the client's toolchain; web/dist is committed because the bridge serves it as-is
 web/node_modules/
+
+# runtime state of scripts/webchat.sh (pid + logs)
+.run/
