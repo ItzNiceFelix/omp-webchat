@@ -3399,6 +3399,22 @@ main {
    retargets mid-flight from whatever is on screen instead of stacking half-faded layers, which
    is what used to make the whole shell flare when the model changed its mind quickly. */
 
+/* Two dimmers, not one. `--dim` is the hairline tint the aurora bands and the overlays ride at,
+   `--orb` is the light pair. They have to be separate: an `opacity` on `.amb` itself multiplies
+   every child, which capped the orbs at the veil's 0.16 and made them invisible on a wide
+   desktop where the veil has room to spread. */
+@property --dim {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+
+@property --orb {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+
 @property --ya {
 	syntax: "<color>";
 	inherits: true;
@@ -3411,25 +3427,19 @@ main {
 	initial-value: #5b6cff;
 }
 
-@property --amp {
-	syntax: "<number>";
-	inherits: true;
-	initial-value: 0;
-}
-
 .amb {
 	position: absolute;
 	inset: 0;
 	z-index: -1;
 	pointer-events: none;
 	overflow: hidden;
-	opacity: var(--amp);
 	/* Long enough to read as a change of mood, short enough that a fast flip never leaves the
 	   previous status half-visible. Linear on the colours so an interrupted fade keeps its rate. */
 	transition:
 		--ya 620ms linear,
 		--yb 620ms linear,
-		--amp 420ms ease;
+		--dim 420ms ease,
+		--orb 480ms ease;
 
 	/* Gaussian falloffs sampled every 5.6%. A plain linear radial ramp leaves a bright plateau in
 	   the middle of each light and a hard edge where it runs out; these are the profiles from the
@@ -3533,6 +3543,7 @@ main {
 .vv {
 	position: absolute;
 	inset: 0;
+	opacity: var(--dim);
 	animation: amb-hue 32s linear infinite reverse;
 }
 
@@ -3574,14 +3585,19 @@ main {
 
 /* yin-yang: two lights swinging through each other, each trailing a soft swirl. They hold the
    phase colour on purpose: the veil behind them is the part that cycles hue, so a fast LLM
-   status flip still reads as a colour change instead of drifting into the next phase's hue. */
-.yy {
-	position: absolute;
+   status flip still reads as a colour change instead of drifting into the next phase's hue.
+   `inset: auto` is load-bearing: `.amb > i` sets `inset: 0` for the full-bleed layers, and it
+   outranks a bare `.yy` on specificity, which pinned the pair to the top-left corner and then
+   threw it off-screen with a -50% translate. Anchored a little above centre so the lights sit
+   behind the transcript rather than in the dead space under the composer. */
+.amb > i.yy {
+	inset: auto;
 	left: 50%;
-	top: 50%;
+	top: 42%;
 	translate: -50% -50%;
-	width: min(80%, 480px);
+	width: min(78%, 460px);
 	aspect-ratio: 1;
+	opacity: var(--orb);
 	animation: amb-spin 14s linear infinite;
 }
 
@@ -3616,21 +3632,23 @@ main {
 	mask-image: radial-gradient(closest-side, var(--m-orb));
 }
 
-/* yang: the hot core and an eye in the opposite family, so the pair always reads as yin-yang
-   rather than two tints of whatever colour the phase happens to use */
+/* yang: warm light with a blue eye; yin: cool light with a red eye. The pair keeps the fixed
+   opposition from the approved demo on purpose. Driving both orbs from the phase palette made
+   them two tints of one colour, which reads as a single smudge instead of a yin-yang, so the
+   phase colour lives in the veil behind them and the lights stay complementary. */
 .yo.r {
 	top: -10%;
-	--c: var(--ya);
-	--hot: color-mix(in srgb, var(--ya) 34%, #fff);
-	--eye: color-mix(in srgb, var(--ya) 30%, #3d6bff);
+	--c: #ff2a45;
+	--hot: #ffb3a8;
+	--eye: #3d6bff;
 	animation: amb-swing-a 6s ease-in-out infinite alternate;
 }
 
 .yo.b {
 	bottom: -10%;
-	--c: var(--yb);
-	--hot: color-mix(in srgb, var(--yb) 40%, #fff);
-	--eye: color-mix(in srgb, var(--yb) 32%, #ff3b55);
+	--c: #00d98a;
+	--hot: #b8ffe0;
+	--eye: #ff3b55;
 	animation: amb-swing-b 6s ease-in-out infinite alternate;
 }
 
@@ -3713,38 +3731,44 @@ main {
 .app[data-phase="think"] .amb {
 	--ya: #9b51e0;
 	--yb: #5b6cff;
-	--amp: 0.16;
+	--dim: 0.16;
+	--orb: 0.42;
 }
 
 .app[data-phase="tool"] .amb {
 	--ya: #00f2fe;
 	--yb: #4facfe;
-	--amp: 0.13;
+	--dim: 0.13;
+	--orb: 0.38;
 }
 
 .app[data-phase="write"] .amb {
 	--ya: #6ee08a;
 	--yb: #00f2fe;
-	--amp: 0.15;
+	--dim: 0.15;
+	--orb: 0.40;
 }
 
 .app[data-phase="retry"] .amb,
 .app[data-phase="compact"] .amb {
 	--ya: #ffb300;
 	--yb: #ff9f43;
-	--amp: 0.14;
+	--dim: 0.14;
+	--orb: 0.40;
 }
 
 .app[data-phase="error"] .amb {
 	--ya: #ff6b81;
 	--yb: #ffb4ab;
-	--amp: 0.24;
+	--dim: 0.24;
+	--orb: 0.46;
 }
 
 .app[data-phase="done"] .amb {
 	--ya: #6ee08a;
 	--yb: #34e0a1;
-	--amp: 0.3;
+	--dim: 0.30;
+	--orb: 0.50;
 }
 
 /* tool: a cyan scan, so "running a command" reads as machinery rather than thought */
@@ -3850,11 +3874,10 @@ main {
 		animation: none !important;
 	}
 
-	/* Still one static tint per phase, just dimmer and without the moving bands. Declared after
-	   the phase map so this opacity beats `opacity: var(--amp)` at equal specificity. */
-	.amb {
-		transition: none;
-		opacity: calc(var(--amp) * 0.7);
+	/* Reduced motion keeps one static tint per phase: the bands and lights stop moving, and the
+	   veil drops to a dimmer so a still frame never sits behind text at full strength. */
+	.vv {
+		opacity: calc(var(--dim) * 0.7);
 	}
 
 	.rip::before,
