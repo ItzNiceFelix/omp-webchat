@@ -93,28 +93,22 @@ function Shell() {
 			data-touch={touch ? "true" : "false"}
 		>
 			<div className="amb" aria-hidden="true">
-				{/* One layer per phase (think / tool / write / retry+compact / error / done); CSS fades
-				    the layer that matches `data-phase` in and pauses the rest. */}
-				<i className="l l-think">
-					<b />
-					<b />
-					<b />
+				{/* One field for every phase: an aurora veil behind a pair of counter-swinging
+				    yin-yang lights. The tree never unmounts and never restarts; `data-phase` only
+				    retargets two registered colours and one opacity, so a fast think -> tool -> think
+				    flip interpolates from whatever is on screen instead of cross-fading six layers
+				    on top of each other. The three overlays below are opacity-only additions. */}
+				<i className="vv">
+					<b className="veil" />
+					<b className="veil b" />
 				</i>
-				<i className="l l-tool">
-					<b className="tb2" />
-					<b className="grid" />
-					<b className="beam" />
+				<i className="yy">
+					<b className="yo r" />
+					<b className="yo b" />
 				</i>
-				<i className="l l-write">
-					<b />
-					<b />
-				</i>
-				<i className="l l-wait">
-					<b />
-					<b />
-				</i>
-				<i className="l l-err" />
-				<i className="l l-done" />
+				<i className="scan" />
+				<i className="vign" />
+				<i className="rip" />
 			</div>
 			<Header />
 			<div className={`side-wrap${ui.sidebarOpen ? " open" : ""}`}>

@@ -322,26 +322,10 @@ kbd {
 }
 
 /* Ambient tint: one absolutely positioned layer, painted per phase under `.amb` (see the
-   "ambient: one layer per phase" block). z-index -1 plus `.app { isolation: isolate }` keeps it
-   above the shell background and below every child. */
-
-/* Turn-end pulse: a wash that fades once, and a vignette on failure. Opacity only, both
-   bounded — the wash runs `both` for its 1.8s and the vignette stops after three beats. */
-.app[data-phase="done"]::after,
-.app[data-phase="error"]::after {
-	content: "";
-	position: absolute;
-	inset: 0;
-	z-index: -1;
-	pointer-events: none;
-	animation: wash 1.8s ease-out both;
-	background: radial-gradient(circle at 50% 62%, color-mix(in srgb, var(--ph) 22%, transparent), transparent 62%);
-}
-
-.app[data-phase="error"]::after {
-	animation: errp 1s ease-in-out 3;
-	background: radial-gradient(ellipse at center, transparent 42%, color-mix(in srgb, var(--err) 30%, transparent) 100%);
-}
+   "ambient: one field" block). z-index -1 plus `.app { isolation: isolate }` keeps it above the
+   shell background and below every child. The turn-end wash and the failure vignette live in
+   that same field now, so they share one shape (`.rip`, `.vign`) instead of a second full-bleed
+   pseudo-element per phase. */
 
 @keyframes wash {
 	from {
@@ -3142,15 +3126,8 @@ main {
 		background: var(--ph);
 	}
 
-	/* Static tints: the ambient and the pulse become flat colour instead of motion. */
-	.amb {
-		transition: none;
-	}
-
-	.app[data-phase="done"]::after,
-	.app[data-phase="error"]::after {
-		display: none;
-	}
+	/* The ambient field handles its own reduced-motion case at the end of the sheet, where it
+	   can outrank the phase rules that set its opacity. */
 
 	.tool.running::before,
 	.thinking.streaming .lbl {
@@ -3414,249 +3391,431 @@ main {
 		0 0 24px -8px var(--ph);
 }
 
-/* ---- ambient: one layer per phase */
+/* ---- ambient: one field, recoloured per phase (variant F)
+
+   One aurora veil plus a pair of counter-swinging yin-yang lights. The tree is always mounted
+   and always animating; a phase change only retargets two registered colours and one opacity.
+   Registered custom properties interpolate, so a think -> tool -> think flip 200ms apart
+   retargets mid-flight from whatever is on screen instead of stacking half-faded layers, which
+   is what used to make the whole shell flare when the model changed its mind quickly. */
+
+@property --ya {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #9b51e0;
+}
+
+@property --yb {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #5b6cff;
+}
+
+@property --amp {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+
 .amb {
 	position: absolute;
 	inset: 0;
 	z-index: -1;
 	pointer-events: none;
 	overflow: hidden;
-	background: none;
+	opacity: var(--amp);
+	/* Long enough to read as a change of mood, short enough that a fast flip never leaves the
+	   previous status half-visible. Linear on the colours so an interrupted fade keeps its rate. */
+	transition:
+		--ya 620ms linear,
+		--yb 620ms linear,
+		--amp 420ms ease;
+
+	/* Gaussian falloffs sampled every 5.6%. A plain linear radial ramp leaves a bright plateau in
+	   the middle of each light and a hard edge where it runs out; these are the profiles from the
+	   approved mockup. They are masks, not gradient colours, so the paint stays one flat colour
+	   and a single variable can recolour it. */
+	--m-orb: rgba(0,0,0,1.000) 0%,
+		rgba(0,0,0,0.989) 5.6%,
+		rgba(0,0,0,0.958) 11.1%,
+		rgba(0,0,0,0.909) 16.7%,
+		rgba(0,0,0,0.844) 22.2%,
+		rgba(0,0,0,0.766) 27.8%,
+		rgba(0,0,0,0.681) 33.3%,
+		rgba(0,0,0,0.592) 38.9%,
+		rgba(0,0,0,0.502) 44.4%,
+		rgba(0,0,0,0.416) 50%,
+		rgba(0,0,0,0.336) 55.6%,
+		rgba(0,0,0,0.264) 61.1%,
+		rgba(0,0,0,0.201) 66.7%,
+		rgba(0,0,0,0.147) 72.2%,
+		rgba(0,0,0,0.102) 77.8%,
+		rgba(0,0,0,0.066) 83.3%,
+		rgba(0,0,0,0.038) 88.9%,
+		rgba(0,0,0,0.016) 94.4%,
+		rgba(0,0,0,0.000) 100%;
+	--m-soft: rgba(0,0,0,0.800) 0%,
+		rgba(0,0,0,0.785) 5.6%,
+		rgba(0,0,0,0.740) 11.1%,
+		rgba(0,0,0,0.672) 16.7%,
+		rgba(0,0,0,0.587) 22.2%,
+		rgba(0,0,0,0.493) 27.8%,
+		rgba(0,0,0,0.399) 33.3%,
+		rgba(0,0,0,0.310) 38.9%,
+		rgba(0,0,0,0.232) 44.4%,
+		rgba(0,0,0,0.166) 50%,
+		rgba(0,0,0,0.115) 55.6%,
+		rgba(0,0,0,0.076) 61.1%,
+		rgba(0,0,0,0.048) 66.7%,
+		rgba(0,0,0,0.029) 72.2%,
+		rgba(0,0,0,0.017) 77.8%,
+		rgba(0,0,0,0.009) 83.3%,
+		rgba(0,0,0,0.004) 88.9%,
+		rgba(0,0,0,0.001) 94.4%,
+		rgba(0,0,0,0.000) 100%;
+	--m-veil: rgba(0,0,0,1.000) 0%,
+		rgba(0,0,0,0.994) 5.6%,
+		rgba(0,0,0,0.977) 11.1%,
+		rgba(0,0,0,0.950) 16.7%,
+		rgba(0,0,0,0.912) 22.2%,
+		rgba(0,0,0,0.865) 27.8%,
+		rgba(0,0,0,0.810) 33.3%,
+		rgba(0,0,0,0.748) 38.9%,
+		rgba(0,0,0,0.681) 44.4%,
+		rgba(0,0,0,0.610) 50%,
+		rgba(0,0,0,0.536) 55.6%,
+		rgba(0,0,0,0.461) 61.1%,
+		rgba(0,0,0,0.387) 66.7%,
+		rgba(0,0,0,0.314) 72.2%,
+		rgba(0,0,0,0.243) 77.8%,
+		rgba(0,0,0,0.176) 83.3%,
+		rgba(0,0,0,0.113) 88.9%,
+		rgba(0,0,0,0.054) 94.4%,
+		rgba(0,0,0,0.000) 100%;
+	--m-tail: rgba(0,0,0,0.000) 0%,
+		rgba(0,0,0,0.000) 5.6%,
+		rgba(0,0,0,0.000) 11.1%,
+		rgba(0,0,0,0.000) 16.7%,
+		rgba(0,0,0,0.000) 22.2%,
+		rgba(0,0,0,0.054) 27.8%,
+		rgba(0,0,0,0.173) 33.3%,
+		rgba(0,0,0,0.342) 38.9%,
+		rgba(0,0,0,0.549) 44.4%,
+		rgba(0,0,0,0.759) 50%,
+		rgba(0,0,0,0.924) 55.6%,
+		rgba(0,0,0,0.999) 61.1%,
+		rgba(0,0,0,0.960) 66.7%,
+		rgba(0,0,0,0.819) 72.2%,
+		rgba(0,0,0,0.618) 77.8%,
+		rgba(0,0,0,0.405) 83.3%,
+		rgba(0,0,0,0.222) 88.9%,
+		rgba(0,0,0,0.086) 94.4%,
+		rgba(0,0,0,0.000) 100%;
 }
 
-.app[data-phase="done"]::after,
-.app[data-phase="error"]::after {
-	display: none;
-}
-
-.amb .l {
+.amb > i {
 	position: absolute;
 	inset: 0;
-	opacity: 0;
-	transition: opacity 1s ease;
-	--o: 0.45;
-}
-
-.amb .l-done {
-	transition-duration: 0.2s;
-}
-
-.app[data-phase="think"] .l-think,
-.app[data-phase="tool"] .l-tool,
-.app[data-phase="write"] .l-write,
-.app[data-phase="retry"] .l-wait,
-.app[data-phase="compact"] .l-wait,
-.app[data-phase="error"] .l-err,
-.app[data-phase="done"] .l-done {
-	opacity: 1;
-}
-
-/* Only the layer in view animates; the rest stay paused. */
-.amb .l *,
-.amb .l::before,
-.amb .l::after {
-	animation-play-state: paused;
-}
-
-.app[data-phase="think"] .l-think *,
-.app[data-phase="tool"] .l-tool *,
-.app[data-phase="write"] .l-write *,
-.app[data-phase="retry"] .l-wait *,
-.app[data-phase="compact"] .l-wait *,
-.app[data-phase="error"] .l-err::after {
-	animation-play-state: running;
-}
-
-.amb .l b {
-	position: absolute;
 	display: block;
+}
+
+/* dither: an 8-bit gradient at 0.16 opacity bands visibly across a whole viewport */
+.amb::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	opacity: 0.5;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .16 0 0 0 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* aurora veil: two bands drifting across each other. The hue cycle keeps the tint moving even
+   while the phase, and therefore the base colour, is steady. */
+.vv {
+	position: absolute;
+	inset: 0;
+	animation: amb-hue 32s linear infinite reverse;
+}
+
+.veil {
+	position: absolute;
+	width: 160%;
+	height: 70%;
+	left: -30%;
+	top: 4%;
+	background: linear-gradient(
+		100deg,
+		color-mix(in srgb, var(--ya) 55%, transparent),
+		color-mix(in srgb, var(--yb) 60%, transparent) 34%,
+		color-mix(in srgb, var(--ya) 42%, transparent) 62%,
+		color-mix(in srgb, var(--yb) 32%, transparent)
+	);
+	-webkit-mask-image: radial-gradient(closest-side, var(--m-veil));
+	mask-image: radial-gradient(closest-side, var(--m-veil));
+	filter: blur(24px);
+	animation:
+		amb-drift 18s ease-in-out infinite alternate,
+		amb-breathe 8s ease-in-out infinite;
+}
+
+.veil.b {
+	top: 42%;
+	height: 56%;
+	width: 140%;
+	left: -20%;
+	background: linear-gradient(
+		80deg,
+		color-mix(in srgb, var(--yb) 45%, transparent),
+		color-mix(in srgb, var(--ya) 40%, transparent) 50%,
+		color-mix(in srgb, var(--yb) 30%, transparent)
+	);
+	animation-duration: 24s, 11s;
+	animation-direction: alternate, alternate-reverse;
+}
+
+/* yin-yang: two lights swinging through each other, each trailing a soft swirl. They hold the
+   phase colour on purpose: the veil behind them is the part that cycles hue, so a fast LLM
+   status flip still reads as a colour change instead of drifting into the next phase's hue. */
+.yy {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	translate: -50% -50%;
+	width: min(80%, 480px);
 	aspect-ratio: 1;
-	border-radius: 50%;
-	opacity: var(--o);
-	background: radial-gradient(closest-side, var(--c), transparent);
+	animation: amb-spin 14s linear infinite;
 }
 
-@keyframes mk-d1 {
-	to {
-		transform: translate(18%, 22%) scale(1.25);
-	}
+.yy::before,
+.yy::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	-webkit-mask-image: radial-gradient(closest-side, var(--m-tail));
+	mask-image: radial-gradient(closest-side, var(--m-tail));
+	filter: blur(22px);
 }
 
-@keyframes mk-d2 {
-	to {
-		transform: translate(-20%, 15%) scale(0.85);
-	}
+.yy::before {
+	background: conic-gradient(from 0deg, transparent 0%, color-mix(in srgb, var(--ya) 58%, transparent) 62%, transparent 100%);
 }
 
-@keyframes mk-d3 {
-	to {
-		transform: translate(10%, -25%) scale(1.15);
-	}
+.yy::after {
+	background: conic-gradient(from 0deg, transparent 0%, color-mix(in srgb, var(--yb) 50%, transparent) 62%, transparent 100%);
+	transform: rotate(180deg);
 }
 
-/* thinking: three slow violet/indigo orbs, like breathing */
-.amb .l-think b:nth-child(1) {
-	--c: var(--violet-deep);
-	width: 75%;
-	left: -15%;
-	top: -6%;
-	animation: mk-d1 9s ease-in-out infinite alternate;
-}
-
-.amb .l-think b:nth-child(2) {
-	--c: #5b6cff;
-	width: 65%;
-	right: -20%;
-	top: 30%;
-	animation: mk-d2 11s ease-in-out infinite alternate;
-}
-
-.amb .l-think b:nth-child(3) {
-	--c: var(--violet);
-	width: 60%;
-	left: 20%;
-	bottom: -20%;
-	animation: mk-d3 13s ease-in-out infinite alternate;
-}
-
-/* retry / compaction: the same drift in amber, so "waiting, not failed" reads differently */
-.amb .l-wait b:nth-child(1) {
-	--c: var(--amber);
+.yo {
+	position: absolute;
+	left: 15%;
+	display: block;
 	width: 70%;
-	left: -10%;
-	top: 5%;
-	animation: mk-d1 7s ease-in-out infinite alternate;
+	aspect-ratio: 1;
+	mix-blend-mode: screen;
+	background: var(--c);
+	-webkit-mask-image: radial-gradient(closest-side, var(--m-orb));
+	mask-image: radial-gradient(closest-side, var(--m-orb));
 }
 
-.amb .l-wait b:nth-child(2) {
-	--c: #ff9f43;
-	width: 60%;
-	right: -18%;
-	bottom: -8%;
-	animation: mk-d2 9s ease-in-out infinite alternate;
+/* yang: the hot core and an eye in the opposite family, so the pair always reads as yin-yang
+   rather than two tints of whatever colour the phase happens to use */
+.yo.r {
+	top: -10%;
+	--c: var(--ya);
+	--hot: color-mix(in srgb, var(--ya) 34%, #fff);
+	--eye: color-mix(in srgb, var(--ya) 30%, #3d6bff);
+	animation: amb-swing-a 6s ease-in-out infinite alternate;
 }
 
-/* tool: a cyan scanning grid, a beam sweeping down, a faster orb */
-.amb .l-tool b.grid,
-.amb .l-tool b.beam {
-	left: 0;
-	right: 0;
-	aspect-ratio: auto;
-	border-radius: 0;
-	opacity: 1;
-	background: none;
+.yo.b {
+	bottom: -10%;
+	--c: var(--yb);
+	--hot: color-mix(in srgb, var(--yb) 40%, #fff);
+	--eye: color-mix(in srgb, var(--yb) 32%, #ff3b55);
+	animation: amb-swing-b 6s ease-in-out infinite alternate;
 }
 
-.amb .l-tool b.grid {
-	top: 0;
-	bottom: 0;
-	background-image:
-		linear-gradient(color-mix(in srgb, var(--cyan) 20%, transparent) 1px, transparent 1px),
-		linear-gradient(90deg, color-mix(in srgb, var(--cyan) 20%, transparent) 1px, transparent 1px);
-	background-size: 28px 28px;
+.yo::before,
+.yo::after {
+	content: "";
+	position: absolute;
+	-webkit-mask-image: radial-gradient(closest-side, var(--m-soft));
+	mask-image: radial-gradient(closest-side, var(--m-soft));
+}
+
+.yo::before {
+	inset: 24%;
+	background: var(--hot);
+}
+
+.yo::after {
+	inset: 36%;
+	background: var(--eye);
+}
+
+@keyframes amb-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes amb-breathe {
+	0%,
+	100% {
+		opacity: 0.55;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@keyframes amb-drift {
+	from {
+		transform: translate3d(-8%, 6%, 0) rotate(-6deg) scale(1);
+	}
+	to {
+		transform: translate3d(8%, -8%, 0) rotate(8deg) scale(1.12);
+	}
+}
+
+/* ui: the band never sits still, but the hue only breathes a little. A full 360deg cycle would
+   walk a violet veil into green within ten seconds and erase the phase colour the chip and the
+   lights are using to say what omp is doing. */
+@keyframes amb-hue {
+	0%,
+	100% {
+		filter: hue-rotate(-12deg);
+	}
+	50% {
+		filter: hue-rotate(14deg);
+	}
+}
+
+@keyframes amb-swing-a {
+	from {
+		transform: translateY(-3%) scale(0.88);
+	}
+	to {
+		transform: translateY(24%) scale(1.15);
+	}
+}
+
+@keyframes amb-swing-b {
+	from {
+		transform: translateY(3%) scale(0.88);
+	}
+	to {
+		transform: translateY(-24%) scale(1.15);
+	}
+}
+
+/* Phase map: two lights, plus how strongly the field shows. Everything here is a registered
+   property or an opacity, so swapping phases mid-transition is safe. */
+.app[data-phase="think"] .amb {
+	--ya: #9b51e0;
+	--yb: #5b6cff;
+	--amp: 0.16;
+}
+
+.app[data-phase="tool"] .amb {
+	--ya: #00f2fe;
+	--yb: #4facfe;
+	--amp: 0.13;
+}
+
+.app[data-phase="write"] .amb {
+	--ya: #6ee08a;
+	--yb: #00f2fe;
+	--amp: 0.15;
+}
+
+.app[data-phase="retry"] .amb,
+.app[data-phase="compact"] .amb {
+	--ya: #ffb300;
+	--yb: #ff9f43;
+	--amp: 0.14;
+}
+
+.app[data-phase="error"] .amb {
+	--ya: #ff6b81;
+	--yb: #ffb4ab;
+	--amp: 0.24;
+}
+
+.app[data-phase="done"] .amb {
+	--ya: #6ee08a;
+	--yb: #34e0a1;
+	--amp: 0.3;
+}
+
+/* tool: a cyan scan, so "running a command" reads as machinery rather than thought */
+.scan {
+	opacity: 0;
+	transition: opacity 260ms ease;
 	-webkit-mask-image: radial-gradient(ellipse at 50% 55%, #000 10%, transparent 75%);
 	mask-image: radial-gradient(ellipse at 50% 55%, #000 10%, transparent 75%);
-	animation: mk-gm 1.6s linear infinite;
 }
 
-@keyframes mk-gm {
+.scan::before {
+	content: "";
+	position: absolute;
+	inset: -28px;
+	background-image:
+		linear-gradient(color-mix(in srgb, var(--ya) 22%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, var(--ya) 22%, transparent) 1px, transparent 1px);
+	background-size: 28px 28px;
+	animation: amb-grid 1.6s linear infinite;
+}
+
+.scan::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: -40%;
+	height: 38%;
+	background: linear-gradient(transparent, color-mix(in srgb, var(--ya) 30%, transparent), transparent);
+	animation: amb-scan 2.4s linear infinite;
+}
+
+/* one cell of travel, so the loop has no seam; transform only, no background-position repaint */
+@keyframes amb-grid {
 	to {
-		background-position:
-			0 28px,
-			28px 0;
+		transform: translate3d(-28px, -28px, 0);
 	}
 }
 
-.amb .l-tool b.beam {
-	top: -40%;
-	height: 38%;
-	background: linear-gradient(transparent, color-mix(in srgb, var(--cyan) 30%, transparent), transparent);
-	animation: mk-scan 2.4s linear infinite;
-}
-
-@keyframes mk-scan {
+@keyframes amb-scan {
 	to {
 		transform: translateY(370%);
 	}
 }
 
-.amb .l-tool b.tb2 {
-	--c: var(--cyan);
-	width: 65%;
-	right: -15%;
-	bottom: -10%;
-	animation: mk-d2 7s ease-in-out infinite alternate;
-}
-
-/* writing: two wide mint/cyan bands flowing sideways along the bottom, like an aurora */
-@keyframes mk-fl1 {
-	from {
-		transform: translateX(-14%) scaleY(0.8);
-	}
-	to {
-		transform: translateX(14%) scaleY(1.25);
-	}
-}
-
-@keyframes mk-fl2 {
-	from {
-		transform: translateX(14%) scaleY(1.2);
-	}
-	to {
-		transform: translateX(-14%) scaleY(0.8);
-	}
-}
-
-.amb .l-write b {
-	width: 105%;
-	height: 36%;
-	left: -10%;
-	aspect-ratio: auto;
-}
-
-.amb .l-write b:nth-child(1) {
-	--c: var(--ok);
-	bottom: -12%;
-	animation: mk-fl1 8s ease-in-out infinite alternate;
-}
-
-.amb .l-write b:nth-child(2) {
-	--c: var(--cyan);
-	bottom: -4%;
-	left: 15%;
-	animation: mk-fl2 10s ease-in-out infinite alternate;
+.app[data-phase="tool"] .scan {
+	opacity: 1;
 }
 
 /* failure: a red vignette that beats */
-.amb .l-err::after {
-	content: "";
-	position: absolute;
-	inset: 0;
-	background: radial-gradient(ellipse at center, transparent 40%, color-mix(in srgb, var(--err) 40%, transparent) 100%);
+.vign {
+	opacity: 0;
+	transition: opacity 320ms ease;
+	background: radial-gradient(ellipse at center, transparent 38%, color-mix(in srgb, var(--ya) 45%, transparent) 100%);
+}
+
+.app[data-phase="error"] .vign {
+	opacity: 1;
 	animation: errp 1s ease-in-out infinite;
 }
 
-/* done: a mint wash and one ripple out from the middle */
-@keyframes mk-ringo {
-	from {
-		opacity: 0.9;
-		transform: translate(-50%, -50%) scale(0.2);
-	}
-	to {
-		opacity: 0;
-		transform: translate(-50%, -50%) scale(4);
-	}
-}
-
-.amb .l-done::before {
+/* done: a wash and one ripple out from the middle */
+.rip::before {
 	content: "";
 	position: absolute;
 	inset: 0;
 	opacity: 0;
-	background: radial-gradient(circle at 50% 62%, color-mix(in srgb, var(--ok) 34%, transparent), transparent 62%);
+	background: radial-gradient(circle at 50% 62%, color-mix(in srgb, var(--ya) 32%, transparent), transparent 62%);
 }
 
-.amb .l-done::after {
+.rip::after {
 	content: "";
 	position: absolute;
 	left: 50%;
@@ -3664,23 +3823,22 @@ main {
 	width: 40%;
 	aspect-ratio: 1;
 	border-radius: 50%;
-	border: 2px solid var(--ok);
+	border: 2px solid var(--ya);
 	opacity: 0;
 	transform: translate(-50%, -50%) scale(0.2);
 }
 
-.app[data-phase="done"] .l-done::before {
+.app[data-phase="done"] .rip::before {
 	animation: wash 1.8s ease-out both;
 }
 
-.app[data-phase="done"] .l-done::after {
+.app[data-phase="done"] .rip::after {
 	animation: mk-ringo 1.6s ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.amb .l *,
-	.amb .l::before,
-	.amb .l::after,
+	.amb *,
+	.amb::after,
 	.mk-spark,
 	.mk-spark path,
 	.mk-ring,
@@ -3690,6 +3848,19 @@ main {
 	.tool-out div,
 	.send.stop::after {
 		animation: none !important;
+	}
+
+	/* Still one static tint per phase, just dimmer and without the moving bands. Declared after
+	   the phase map so this opacity beats `opacity: var(--amp)` at equal specificity. */
+	.amb {
+		transition: none;
+		opacity: calc(var(--amp) * 0.7);
+	}
+
+	.rip::before,
+	.rip::after,
+	.vign {
+		display: none;
 	}
 
 	.mk-ck path {
