@@ -1,5 +1,5 @@
-import { Check, CircleAlert, Loader, PenLine, RotateCw, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { CheckDraw, CrossDraw, Ring, Spark, Wave } from "../icons";
 import type { Phase } from "../phase-core";
 import { usePhase } from "../phase";
 import { useStore } from "../useStore";
@@ -15,22 +15,22 @@ const LABEL: Record<Phase, string> = {
 	done: "done",
 };
 
+/** The mockup's glyph per phase: sparkle (thinking), ring (tool/retry/compact), waveform
+ *  (writing), drawn tick/cross (done/failed). All tinted by `--ph` through currentColor. */
 function Icon({ phase }: { phase: Phase }) {
-	const size = 12;
 	switch (phase) {
 		case "think":
-			return <Sparkles size={size} className="pi-spark" />;
+			return <Spark />;
 		case "tool":
-			return <Loader size={size} className="spin" />;
-		case "write":
-			return <PenLine size={size} />;
 		case "retry":
 		case "compact":
-			return <RotateCw size={size} className="spin" />;
+			return <Ring />;
+		case "write":
+			return <Wave />;
 		case "error":
-			return <CircleAlert size={size} />;
+			return <CrossDraw />;
 		case "done":
-			return <Check size={size} />;
+			return <CheckDraw />;
 		default:
 			return null;
 	}
@@ -51,15 +51,16 @@ function Elapsed({ since }: { since: number | null }) {
 /**
  * "What omp is doing" as one chip: phase icon, word and elapsed time.
  *
- * The word and the colour come from `store.phase()`; a running tool names itself. Tapping it
- * jumps to that tool's card, which is the one thing a scrolled-away reader wants next.
+ * The word and the colour come from `store.phase()`; a running tool names itself as
+ * `tool · name`. Tapping it jumps to that tool's card, which is the one thing a scrolled-away
+ * reader wants next.
  */
 export function PhaseChip() {
 	const phase = usePhase();
 	const since = useStore((select) => select.phaseSince());
 	const tool = useStore((select) => select.runningTool());
 	const queued = useStore((select) => select.queue.steering.length + select.queue.followUp.length);
-	const label = phase === "tool" && tool?.name ? tool.name : LABEL[phase];
+	const label = phase === "tool" && tool?.name ? `tool · ${tool.name}` : LABEL[phase];
 
 	const jump = () => {
 		if (!tool) return;
@@ -75,7 +76,7 @@ export function PhaseChip() {
 			disabled={!tool}
 			title={tool ? `Running ${tool.name} — tap to jump to its card` : `Phase: ${LABEL[phase]}`}
 		>
-			<span className="pi">
+			<span className="pi" key={phase}>
 				<Icon phase={phase} />
 			</span>
 			<span className="pl" key={label}>

@@ -254,7 +254,7 @@ export function Composer() {
 							disabled={sending}
 							onClick={() => (stopping ? void store.abort() : void send())}
 						>
-							{stopping ? <Square size={14} /> : sending ? <Loader size={16} className="spin" /> : <Send size={16} />}
+							{stopping ? <Square size={12} fill="currentColor" strokeWidth={0} /> : sending ? <Loader size={16} className="spin" /> : <Send size={16} />}
 						</button>
 					</div>
 				</div>

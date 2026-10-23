@@ -9,7 +9,7 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCard } from "./ToolCard";
 
 /** One content block. Kept outside the row so each block memoizes on its own props. */
-const BlockView = memo(function BlockView({ block, streaming, caret }: { block: ContentBlock; streaming: boolean; caret?: boolean }) {
+const BlockView = memo(function BlockView({ block, streaming, caret, last = false }: { block: ContentBlock; streaming: boolean; caret?: boolean; last?: boolean }) {
 	const record = asRecord(block);
 	switch (asString(record?.type)) {
 		case "text":
@@ -17,11 +17,14 @@ const BlockView = memo(function BlockView({ block, streaming, caret }: { block: 
 			// tracks the end of the text without another re-render per delta.
 			return (
 				<div className={`block-text${streaming && caret ? " streaming" : ""}`}>
-					<Markdown text={asString(record?.text) ?? ""} />
+					<Markdown text={asString(record?.text) ?? ""} live={streaming && caret} />
 				</div>
 			);
 		case "thinking":
-			return <ThinkingBlock text={asString(record?.thinking) ?? ""} streaming={streaming} />;
+			// A thinking block is only "live" while it is still the newest block: once the model moves
+			// on to a tool call or the answer, it settles and folds (the old message-level flag kept it
+			// shimmering until the whole message ended).
+			return <ThinkingBlock text={asString(record?.thinking) ?? ""} streaming={streaming && last} />;
 		case "toolCall":
 			return <ToolCall block={record} />;
 		case "image": {
@@ -96,6 +99,9 @@ function clock(timestamp: number | undefined): string {
  * stream delta re-renders exactly one row and finished rows keep their parsed markdown.
  */
 export const MessageRow = memo(function MessageRow({ message, streaming = false }: { message: Message; streaming?: boolean }) {
+	// `streaming` is "this message sits in the streaming slot"; only `busy` says a turn is live.
+	const busy = useStore((select) => select.busy);
+	const live = streaming && busy;
 	const blocks = blocksOf(message);
 	const lastTextIndex = blocks.reduce((last, block, index) => (asString(asRecord(block)?.type) === "text" ? index : last), -1);
 
@@ -160,7 +166,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 					<Sparkles size={12} />
 				</span>
 				<span className="who-name">omp</span>
-				{streaming && (
+				{live && (
 					<span className="stream-pill">
 						<span className="orb" />
 						streaming
@@ -173,7 +179,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 			</div>
 			<div className="blocks">
 				{blocks.map((block, index) => (
-					<BlockView key={index} block={block} streaming={streaming} caret={index === lastTextIndex} />
+					<BlockView key={index} block={block} streaming={live} caret={index === lastTextIndex} last={index === blocks.length - 1} />
 				))}
 			</div>
 			<UsageLine message={message} />

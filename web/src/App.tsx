@@ -92,7 +92,30 @@ function Shell() {
 			// `hover`/`pointer` are not emulated by every WebView, this is.
 			data-touch={touch ? "true" : "false"}
 		>
-			<div className="amb" aria-hidden="true" />
+			<div className="amb" aria-hidden="true">
+				{/* One layer per phase (think / tool / write / retry+compact / error / done); CSS fades
+				    the layer that matches `data-phase` in and pauses the rest. */}
+				<i className="l l-think">
+					<b />
+					<b />
+					<b />
+				</i>
+				<i className="l l-tool">
+					<b className="tb2" />
+					<b className="grid" />
+					<b className="beam" />
+				</i>
+				<i className="l l-write">
+					<b />
+					<b />
+				</i>
+				<i className="l l-wait">
+					<b />
+					<b />
+				</i>
+				<i className="l l-err" />
+				<i className="l l-done" />
+			</div>
 			<Header />
 			<div className={`side-wrap${ui.sidebarOpen ? " open" : ""}`}>
 				<Sidebar />

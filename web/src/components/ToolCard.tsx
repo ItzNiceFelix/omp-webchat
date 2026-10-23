@@ -1,5 +1,6 @@
-import { Check, ChevronRight, CircleAlert, Loader, Terminal } from "lucide-react";
+import { ChevronRight, Terminal } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { CheckDraw, CrossDraw, Dots, Ring } from "../icons";
 import { store } from "../store";
 import type { ToolEntry } from "../types";
 
@@ -10,9 +11,44 @@ function duration(entry: ToolEntry): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function firstLine(text: string): string {
-	const line = text.split("\n").find((row) => row.trim());
-	return (line ?? "").slice(0, 240);
+function compact(args: unknown): string {
+	if (args === undefined) return "";
+	if (typeof args === "string") return args;
+	try {
+		return JSON.stringify(args);
+	} catch {
+		return String(args);
+	}
+}
+
+/** Non-empty output lines, absolute-indexed by the caller so only a *new* line mounts (and fades in). */
+function outputLines(text: string): string[] {
+	return text
+		.split("\n")
+		.map((row) => row.trimEnd())
+		.filter((row) => row.trim());
+}
+
+const calmMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Types `target` in. Arguments that stream (`partialArgs`) just grow and the effect follows
+ * them; arguments that arrive whole get the same typed-in feel, but only on a card that
+ * started moments ago: a card mounted later (scroll, reload) snaps to its text.
+ */
+function useTyped(target: string, fresh: boolean): string {
+	const [shown, setShown] = useState(fresh ? "" : target);
+	useEffect(() => {
+		if (shown === target) return;
+		if (calmMotion() || !target.startsWith(shown)) {
+			setShown(target);
+			return;
+		}
+		const step = Math.max(2, Math.ceil((target.length - shown.length) / 30));
+		const timer = setTimeout(() => setShown(target.slice(0, shown.length + step)), 16);
+		return () => clearTimeout(timer);
+	}, [target, shown]);
+	return shown;
 }
 
 /**
@@ -23,21 +59,24 @@ function Elapsed({ entry }: { entry: ToolEntry }) {
 	const [, tick] = useState(0);
 	useEffect(() => {
 		if (entry.status !== "running") return;
-		const timer = setInterval(() => tick((count) => count + 1), 250);
+		const timer = setInterval(() => tick((count) => count + 1), 100);
 		return () => clearInterval(timer);
 	}, [entry.status, entry.start]);
 	return <span className="mono">{duration(entry)}</span>;
 }
 
 /**
- * Tool card, collapsed by default and animated: the card rises in when the call starts, the
- * chevron turns, and the body expands on a grid-rows transition (lazily mounted on first open,
- * then kept mounted so the close animation has something to run on).
+ * Tool card. Without opening it you see what the mockup shows: the arguments typed in, a ring
+ * (or bouncing dots while the arguments are still being prepared) with a ticking timer, the
+ * last few output lines fading in, then a drawn tick (or a shaken cross) on settle. The chevron
+ * still opens the full arguments and output on a grid-rows transition (lazily mounted on first
+ * open, then kept mounted so the close animation has something to run on).
  */
 export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) {
 	const [open, setOpen] = useState(false);
 	const [mounted, setMounted] = useState(false);
 	const status = entry.status;
+	const running = status === "running";
 	const body = entry.output ?? entry.preview ?? "";
 
 	// One-shot flash on the transition that matters: the card just finished. `prev` survives
@@ -54,6 +93,14 @@ export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) 
 		}
 	}, [status]);
 
+	const argsText = entry.args !== undefined ? compact(entry.args) : (entry.partialArgs ?? "");
+	const fresh = useRef(running && Date.now() - entry.start < 2500).current;
+	const typed = useTyped(argsText, fresh);
+
+	const lines = outputLines(body);
+	const visible = lines.slice(-4);
+	const offset = lines.length - visible.length;
+
 	const toggle = () => {
 		setMounted(true);
 		setOpen((previous) => !previous);
@@ -68,16 +115,25 @@ export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) 
 				<b>{entry.name}</b>
 				{entry.intent && <span className="tool-intent">{entry.intent}</span>}
 				<span className={`status ${status}`}>
-					{status === "running" ? <Loader size={13} className="spin" /> : status === "ok" ? <Check size={13} /> : <CircleAlert size={13} />}
-					{status === "running" ? "running" : status === "ok" ? "done" : "failed"}
-					{status !== "running" && <span className="sep">·</span>}
-					{status !== "running" && duration(entry)}
+					{running ? argsText ? <Ring /> : <Dots /> : status === "ok" ? <CheckDraw /> : <CrossDraw />}
+					{running ? (argsText ? "running" : "preparing") : status === "ok" ? "done" : "failed"}
+					{running ? (
+						<Elapsed entry={entry} />
+					) : (
+						<>
+							<span className="sep">·</span>
+							{duration(entry)}
+						</>
+					)}
 				</span>
-				{status === "running" && <Elapsed entry={entry} />}
 				<ChevronRight size={15} className={`chev${open ? " open" : ""}`} />
 			</button>
-			{status === "running" && entry.preview && <div className="live-line">{firstLine(entry.preview)}</div>}
-			{status === "error" && !open && <div className="error-line">{firstLine(body) || "tool failed"}</div>}
+			{typed && <pre className="tool-args-line">{typed}</pre>}
+			<div className={`tool-out${visible.length ? " has" : ""}${status === "error" ? " err" : ""}`}>
+				{visible.map((row, index) => (
+					<div key={offset + index}>{row}</div>
+				))}
+			</div>
 			{mounted && (
 				<div className={`disclosure${open ? " open" : ""}`}>
 					<div className="disclosure-inner">
@@ -90,7 +146,7 @@ export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) 
 									</div>
 								)}
 								<div>
-									<div className="col-label">{status === "running" ? "stream" : "output"}</div>
+									<div className="col-label">{running ? "stream" : "output"}</div>
 									<pre>{body || "(no output)"}</pre>
 								</div>
 							</div>
