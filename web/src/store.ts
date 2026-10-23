@@ -135,6 +135,15 @@ export class Store {
 	draftAttachments: DraftAttachment[] = [];
 	/** Which sessions the sidebar lists: only this folder's bucket, or every bucket. */
 	sessionScope: "folder" | "all" = "all";
+	/**
+	 * Folded/unfolded chat groups, keyed by the age label the sidebar shows. Only groups the
+	 * reader actually touched live here: an absent key means "use the default", which is folded
+	 * for every group except the one holding the open session. Keeping it in the store rather
+	 * than component state is load-bearing — the sidebar unmounts whenever it is closed under
+	 * 1100px, and `loadChats` re-runs on a timer, so local state would spring every group open
+	 * again on its own.
+	 */
+	groupOpen: Record<string, boolean> = {};
 	notifyPermission = "default";
 
 	// ---- internals -------------------------------------------------------
@@ -1198,6 +1207,12 @@ export class Store {
 		this.sessionScope = scope;
 		this.emit();
 		void this.loadChats();
+	}
+
+	/** Fold or unfold one chat group. The label is the one the sidebar prints (`today`, …). */
+	toggleGroup(label: string, open: boolean) {
+		this.groupOpen = { ...this.groupOpen, [label]: open };
+		this.emit();
 	}
 
 	/**

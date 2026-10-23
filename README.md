@@ -156,6 +156,9 @@ as woff2, no font CDN), laid out as header / sidebar / chat / agents drawer.
   field.
 - **Chats sidebar** — brand, **New chat**, grouped by age (today / yesterday / previous 7 days /
   older), search, rename, delete (with confirmation, never the active chat), active-chat marker.
+  Group headers fold the list: every group starts folded except the one holding the open session,
+  the header keeps its row count while folded, a search hit opens its group implicitly, and the
+  fold state lives in the store so reloading the list or closing the sheet does not spring it open.
   Below it: session facts + restart, todo card, queued chips with promote/remove, goal, live-voice
   meters, extension widgets.
 - **Agents drawer** — roster with status, agent, model, tokens, elapsed, current assignment; click a

@@ -809,12 +809,47 @@ main {
 	color: var(--text);
 }
 
+/* Group header doubles as the fold control: full-width, so the whole strip is the target rather
+   than a 12px chevron. The count stays visible while folded, which is the only cue that rows
+   are hidden rather than absent. */
 .group {
-	margin: 8px 2px 2px;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	width: 100%;
+	margin: 8px 0 2px;
+	padding: 4px 2px;
+	border-radius: 6px;
 	color: var(--faint);
 	font: 10px var(--mono);
 	text-transform: uppercase;
 	letter-spacing: 0.09em;
+	text-align: left;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.group:hover {
+	background: var(--surface-2);
+	color: var(--muted);
+}
+
+.group svg {
+	flex: none;
+	transition: transform 0.18s ease;
+}
+
+.group svg.folded {
+	transform: rotate(-90deg);
+}
+
+.group span {
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+	color: var(--faint);
+}
+
+.app[data-touch="true"] .group {
+	min-height: 40px;
 }
 
 .chat-row {

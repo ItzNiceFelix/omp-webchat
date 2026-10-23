@@ -1,4 +1,4 @@
-import { BrainCircuit, ChevronUp, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { BrainCircuit, ChevronDown, ChevronUp, Pencil, Plus, Power, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { store, taskMark } from "../store";
 import { useStore } from "../useStore";
 import { useUi } from "../ui";
@@ -38,6 +38,7 @@ export function Sidebar() {
 	const activePath = useStore((select) => select.session?.sessionFile);
 	const cwd = useStore((select) => select.cwd);
 	const session = useStore((select) => select.session);
+	const groupOpen = useStore((select) => select.groupOpen);
 	const ompBin = useStore((select) => select.ompBin);
 	const queue = useStore((select) => select.queue);
 	const widgets = useStore((select) => select.widgets);
@@ -49,6 +50,18 @@ export function Sidebar() {
 	// A brand-new session has no file on disk until its first entry lands: show it anyway.
 	if (activePath && !filter && !rows.some((chat) => chat.path === activePath))
 		rows.unshift({ path: activePath, id: "", name: session?.sessionName || "new chat", firstUser: "", mtime: Date.now(), synthetic: true });
+
+	// Group once, so the fold state, the per-group count and the rendered rows all read the
+	// same buckets. A search hit opens its group implicitly: hiding a match would make the
+	// search look broken.
+	const groups: { label: string; rows: ChatRow[]; holdsActive: boolean }[] = [];
+	for (const chat of rows) {
+		const label = groupLabel(chat.mtime);
+		let group = groups[groups.length - 1];
+		if (!group || group.label !== label) groups.push((group = { label, rows: [], holdsActive: false }));
+		group.rows.push(chat);
+		if (chat.path === activePath) group.holdsActive = true;
+	}
 
 	const todoPhases = session?.todoPhases ?? [];
 	const openTasks = todoPhases.flatMap((phase) => phase.tasks).filter((task) => task.status !== "completed" && task.status !== "abandoned").length;
@@ -105,15 +118,22 @@ export function Sidebar() {
 			)}
 			{!loading && !rows.length && <div className="dim">{filter ? "no match" : "no chats in this scope yet"}</div>}
 
-			{rows.map((chat, index) => (
-				<ChatRowView
-					key={chat.path}
-					chat={chat}
-					active={chat.path === activePath}
-					showFolder={scope === "all"}
-					newGroup={index === 0 || groupLabel(rows[index - 1].mtime) !== groupLabel(chat.mtime)}
-				/>
-			))}
+			{groups.map((group) => {
+				const open = filter ? true : (groupOpen[group.label] ?? group.holdsActive);
+				return (
+					<div key={group.label}>
+						<button type="button" className="group" aria-expanded={open} onClick={() => store.toggleGroup(group.label, !open)}>
+							<ChevronDown size={12} className={open ? undefined : "folded"} />
+							{group.label}
+							<span>{group.rows.length}</span>
+						</button>
+						{open &&
+							group.rows.map((chat) => (
+								<ChatRowView key={chat.path} chat={chat} active={chat.path === activePath} showFolder={scope === "all"} />
+							))}
+					</div>
+				);
+			})}
 
 			<div className="side-card">
 				<h4>
@@ -230,11 +250,10 @@ export function Sidebar() {
 	);
 }
 
-function ChatRowView({ chat, active, newGroup, showFolder }: { chat: ChatRow; active: boolean; newGroup: boolean; showFolder: boolean }) {
+function ChatRowView({ chat, active, showFolder }: { chat: ChatRow; active: boolean; showFolder: boolean }) {
 	const ui = useUi();
 	return (
 		<>
-			{newGroup && <div className="group">{groupLabel(chat.mtime)}</div>}
 			<div
 				className={`chat-row${active ? " selected" : ""}`}
 				title={`${chat.name}\n${chat.synthetic ? "not persisted yet" : chat.path}`}
