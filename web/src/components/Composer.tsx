@@ -7,6 +7,7 @@ import { useStore } from "../useStore";
 import { ContextMeter } from "./ContextMeter";
 import { Modal } from "./Modal";
 import { Palette } from "./Palette";
+import { PhaseChip } from "./PhaseChip";
 
 const PALETTE_LIMIT = 60;
 
@@ -45,6 +46,8 @@ export function Composer() {
 	const ui = useUi();
 	const buffer =
 		usage?.contextWindow && typeof usage.tokens === "number" ? `${Math.max(0, Math.round((usage.contextWindow - usage.tokens) / 1000))}k` : null;
+	// Busy with nothing typed: the one thing left to do is stop. With a draft, send queues it.
+	const stopping = busy && !draft.trim() && attachments.length === 0;
 
 	const paletteMatch = /^\/(\S*)$/.exec(draft.trimStart());
 	const paletteItems = paletteMatch
@@ -164,14 +167,7 @@ export function Composer() {
 			}}
 		>
 			<div className="quick">
-				{busy ? (
-					<span className="quick-pill working">
-						<span className="orb" />
-						working
-					</span>
-				) : (
-					<span className="quick-pill">ready</span>
-				)}
+				<PhaseChip />
 				{buffer && (
 					<span className="quick-pill buffer" title="Tokens still free in the model's context window">
 						buffer · {buffer} free
@@ -248,13 +244,17 @@ export function Composer() {
 					</div>
 					<div>
 						<ContextMeter />
-						{busy && (
-							<button type="button" className="icon stop" aria-label="stop" title="Stop (Esc)" onClick={() => void store.abort()}>
-								<Square size={15} />
-							</button>
-						)}
-						<button type="button" className="send" aria-label="send" title="Send (Enter)" disabled={sending} onClick={() => void send()}>
-							{sending ? <Loader size={16} className="spin" /> : <Send size={16} />}
+						{/* One control: stop while a turn runs and the draft is empty, otherwise send
+						    (which queues a steer/follow-up on a busy turn). */}
+						<button
+							type="button"
+							className={`send${stopping ? " stop" : ""}`}
+							aria-label={stopping ? "stop" : "send"}
+							title={stopping ? "Stop (Esc)" : busy ? "Queue for this turn (Enter)" : "Send (Enter)"}
+							disabled={sending}
+							onClick={() => (stopping ? void store.abort() : void send())}
+						>
+							{stopping ? <Square size={14} /> : sending ? <Loader size={16} className="spin" /> : <Send size={16} />}
 						</button>
 					</div>
 				</div>

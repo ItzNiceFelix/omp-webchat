@@ -38,7 +38,7 @@ export function ThinkingBlock({ text, streaming }: { text: string; streaming: bo
 				}}
 			>
 				<span className="marker" />
-				{label}
+				<span className="lbl">{label}</span>
 				{elapsed && <span className="mono">{elapsed}</span>}
 				<ChevronRight size={13} className={`chev${open ? " open" : ""}`} />
 			</button>

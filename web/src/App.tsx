@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "./useStore";
+import { usePhase } from "./phase";
 import { UiProvider, useUi } from "./ui";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { Composer } from "./components/Composer";
@@ -61,7 +62,9 @@ function useKeyboardInset() {
 
 function Shell() {
 	const ui = useUi();
-	const busy = useStore((select) => select.busy);
+	// The hook, not `select.phase()`: a transient pulse expires on wall clock, so the root
+	// attribute needs the same re-render the chip gets.
+	const phase = usePhase();
 	const statusLine = useStore((select) => select.statusLine);
 	const touch = useMedia("(pointer: coarse)") || navigator.maxTouchPoints > 0;
 	useKeyboardInset();
@@ -81,12 +84,15 @@ function Shell() {
 		<div
 			className="app"
 			data-agents={ui.agentsOpen ? "open" : "closed"}
-			data-busy={busy ? "true" : "false"}
+			// One derived primitive drives every phase surface: the chip, the composer tint and
+			// the ambient gradient. `idle` is the absence of a phase, so CSS needs no selector.
+			data-phase={phase === "idle" ? undefined : phase}
 			// Pointer capability, not a width breakpoint: a phone-width window on a desktop still
 			// wants compact rows, and the APK always wants finger-sized ones. Media queries for
 			// `hover`/`pointer` are not emulated by every WebView, this is.
 			data-touch={touch ? "true" : "false"}
 		>
+			<div className="amb" aria-hidden="true" />
 			<Header />
 			<div className={`side-wrap${ui.sidebarOpen ? " open" : ""}`}>
 				<Sidebar />

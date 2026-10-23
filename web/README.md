@@ -9,6 +9,7 @@ commands, subagents, live voice — is driven by the same `omp --mode rpc-ui` pr
 ```bash
 npm install
 npm run build      # tsc --noEmit && vite build → dist/
+npm test           # node --test test/*.test.ts (phase derivation)
 npm run dev        # vite dev server, proxying /ws and /api to a bridge on 127.0.0.1:7788
 ```
 
@@ -40,8 +41,16 @@ side panels into grid columns):
   rotate, the tool/thinking body expands on a `grid-template-rows` transition (lazily mounted,
   then kept so closing animates too), and the streaming caret is drawn by CSS on the last block.
   Everything is transform/opacity only and collapses under `prefers-reduced-motion`.
-- **Working indicator** — a 2 px aurora strip plus a masked conic aurora border on the composer,
-  driven by `data-busy` and animated only while a turn runs.
+- **Working indicator** — a 2 px phase-tinted strip plus a masked conic border on the composer,
+  driven by `data-phase` and animated only while a turn runs.
+- **Turn phase** — one derived primitive, `store.phase()`, answers "what is omp doing" for every
+  surface at once: the composer's phase chip (word + elapsed + queue count), the root
+  `data-phase` attribute, the ambient tint (`.amb`), the working strip and the composer ring.
+  Order: `retry` → `compact` → `tool` → `think`/`write` (block type, only while `busy`) →
+  `done`/`error` pulse (1.9 s) → `idle`. Everything comes from frames the store already routes;
+  the bridge needs no new frame. `compacting` is tracked from `auto_compaction_start/end`
+  because `session.isCompacting` only arrives with the *next* `get_state`. The derivation is
+  pure (`phase-core.ts`) and covered by `npm test`.
 - **Context usage** — a ring + percentage beside the send button; tap for tokens, window,
   remaining and throughput. The header shows the model and thinking pills, and the composer's quick
   strip shows the free context buffer.

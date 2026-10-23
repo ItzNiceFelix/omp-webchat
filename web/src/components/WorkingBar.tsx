@@ -1,6 +1,6 @@
 import { useStore } from "../useStore";
 
-/** "omp is working" indicator: an aurora strip that sweeps while the turn runs, fading in. */
+/** "omp is working" indicator: a phase-tinted strip that sweeps while the turn runs. */
 export function WorkingBar() {
 	const busy = useStore((select) => select.busy);
 	return (

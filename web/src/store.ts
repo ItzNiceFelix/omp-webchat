@@ -11,6 +11,7 @@
  * re-render every message in the list.
  */
 import { RpcClient, type ConnStatus } from "./client";
+import { derivePhase, PULSE_MS, type Phase } from "./phase-core";
 import {
 	asAssistantEvent,
 	asBtwRecord,
@@ -98,6 +99,12 @@ export class Store {
 	statusLine = "";
 	busy = false;
 	retrying = false;
+	/** Set by the compaction frames; `session.isCompacting` lags until the next `get_state`. */
+	compacting = false;
+	/** Transient turn-end tint (mockup's "done"/"error" ambient), expired by wall clock. */
+	pulse: { kind: "done" | "error"; at: number } | null = null;
+	/** When the current turn began; a failed tool after this point marks the turn as failed. */
+	turnStartedAt = 0;
 
 	messages: Message[] = [];
 	streaming: Message | null = null;
@@ -242,11 +249,14 @@ export class Store {
 				return;
 			case "agent_start":
 				this.busy = true;
+				this.pulse = null;
+				this.turnStartedAt = Date.now();
 				this.emit();
 				return;
 			case "agent_end": {
 				this.busy = false;
 				if (frame.yielded === false) this.notice("agent yielded for retry/compaction — continuing");
+				else this.settlePulse(false);
 				void this.refreshState();
 				void this.loadChats();
 				const expected = asNumber(frame.messageCount) ?? 0;
@@ -259,6 +269,7 @@ export class Store {
 			case "session_settled":
 			case "turn_end":
 				this.busy = false;
+				this.settlePulse(false);
 				this.emit();
 				void this.refreshState();
 				return;
@@ -302,10 +313,16 @@ export class Store {
 				this.notice(`frame too large: ${asString(frame.message) ?? JSON.stringify(frame)}`, "error");
 				return;
 			case "auto_compaction_start":
+				// `isCompacting` only arrives on the next `get_state`, which is after the work
+				// is done; the frame itself is the only signal while it runs.
+				this.compacting = true;
 				this.notice("auto-compaction started…");
+				this.emit();
 				return;
 			case "auto_compaction_end":
+				this.compacting = false;
 				this.notice("auto-compaction finished");
+				this.emit();
 				void this.refreshState();
 				return;
 			case "auto_retry_start":
@@ -322,6 +339,7 @@ export class Store {
 				return;
 			case "prompt_result": {
 				this.busy = false;
+				this.settlePulse(frame.status === "error");
 				void this.refreshState();
 				if (frame.status === "error") {
 					const message = asString(asRecord(frame.error)?.message) ?? "unknown error";
@@ -509,6 +527,72 @@ export class Store {
 
 	getTool(id: string | undefined): ToolEntry | undefined {
 		return id ? this.tools.get(id) : undefined;
+	}
+
+	// ---- turn phase ------------------------------------------------------
+	//
+	// One derived primitive for every "what is omp doing" surface: the phase chip, the root
+	// `data-phase` attribute and the ambient tint. Everything is read from frames the store
+	// already handles, so no server change is involved.
+
+	private runningCache: { map: Map<string, ToolEntry>; first: ToolEntry | null } | null = null;
+
+	/** First running tool, cached on Map identity (the Map is replaced on every write). */
+	runningTool(): ToolEntry | null {
+		if (this.runningCache?.map !== this.tools) {
+			let first: ToolEntry | null = null;
+			for (const entry of this.tools.values()) {
+				if (entry.status === "running") {
+					first = entry;
+					break;
+				}
+			}
+			this.runningCache = { map: this.tools, first };
+		}
+		return this.runningCache.first;
+	}
+
+	phase(): Phase {
+		const blocks = Array.isArray(this.streaming?.content) ? this.streaming.content : [];
+		const last = blocks[blocks.length - 1];
+		const lastType = last?.type;
+		// `toolCall` is the only block carrying an id, but `ContentBlock` is an open union, so
+		// narrow rather than assert: a custom block type must not be trusted for a field read.
+		const lastId = lastType === "toolCall" && "id" in last && typeof last.id === "string" ? last.id : undefined;
+		return derivePhase({
+			retrying: this.retrying,
+			compacting: this.compacting || Boolean(this.session?.isCompacting),
+			toolRunning: this.runningTool() !== null,
+			// A call the tools map has no entry for yet (awaiting start or approval) is still
+			// the tool phase: the model has handed off and nothing else is happening.
+			toolPending: lastId !== undefined && !this.tools.has(lastId),
+			lastBlock: lastType,
+			busy: this.busy,
+			pulse: this.pulse,
+			now: Date.now(),
+		});
+	}
+
+	/** Wall-clock start of the current phase, for the elapsed counter; null when untimed. */
+	phaseSince(): number | null {
+		if (this.retrying || this.compacting || this.session?.isCompacting) return null;
+		const tool = this.runningTool();
+		if (tool) return tool.start;
+		if (this.busy) return this.streaming?.timestamp ?? null;
+		// Only a live pulse is timed: a stale stamp would keep counting after the tint faded.
+		return this.pulse && Date.now() - this.pulse.at < PULSE_MS ? this.pulse.at : null;
+	}
+
+	/** Stamp the turn-end pulse; the phase chip re-renders it away after PULSE_MS. */
+	settlePulse(failed: boolean) {
+		// A turn that ended right after a failed tool is an error, not a success: the runtime
+		// reports `agent_end` without a status.
+		const toolFailed = [...this.tools.values()].some((entry) => entry.status === "error" && (entry.end ?? 0) >= this.turnStartedAt);
+		const kind = failed || toolFailed ? "error" : "done";
+		// `prompt_result` and `turn_end` both arrive for one turn: a later "done" must not
+		// overwrite an error already stamped for that turn.
+		if (kind === "done" && this.pulse?.kind === "error" && this.pulse.at >= this.turnStartedAt) return;
+		this.pulse = { kind, at: Date.now() };
 	}
 
 	/** Oldest transcript index the view renders (cheap client-side windowing). */
@@ -785,11 +869,16 @@ export class Store {
 
 	async newChat() {
 		await this.client.must({ type: "new_session" });
+		this.compacting = false;
+		this.pulse = null;
 		await this.bootstrap();
 	}
 
 	async switchChat(path: string) {
 		await this.client.must({ type: "switch_session", sessionPath: path });
+		// A compaction frame belongs to the session that sent it; the new one starts clean.
+		this.compacting = false;
+		this.pulse = null;
 		await this.bootstrap();
 		this.toast("chat resumed — the runtime replays its context", "info");
 	}
