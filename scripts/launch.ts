@@ -14,8 +14,10 @@ const cwd = process.env.OMP_WEBCHAT_CWD ?? root;
 const runDir = resolve(root, ".run");
 mkdirSync(runDir, { recursive: true });
 
-const out = openSync(resolve(runDir, "webchat.log"), "a");
-const err = openSync(resolve(runDir, "webchat.err.log"), "a");
+// Same per-port suffix as webchat.sh: a second bridge must not write into this one's log.
+const suffix = port === "7788" ? "" : `-${port}`;
+const out = openSync(resolve(runDir, `webchat${suffix}.log`), "a");
+const err = openSync(resolve(runDir, `webchat${suffix}.err.log`), "a");
 const child = spawn(process.execPath, ["run", resolve(root, "src/server.ts"), "--port", port, "--cwd", cwd], {
 	cwd: root,
 	detached: true,

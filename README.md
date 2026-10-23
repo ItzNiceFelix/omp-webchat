@@ -38,12 +38,17 @@ bash scripts/webchat.sh start     # start if needed, wait for the port, open the
 bash scripts/webchat.sh stop      # stop the server and its omp child (also kills a foreign listener)
 bash scripts/webchat.sh restart
 bash scripts/webchat.sh status    # exit 1 when nothing answers
+bash scripts/webchat.sh install   # (re)create the two desktop shortcuts from this checkout
 ```
 
 `start` is idempotent. The detached child writes `.run/webchat.log` and `.run/webchat.err.log`
 (gitignored), and its PID lands in `.run/webchat.pid`; `stop` falls back to whatever PID is
-listening on the port, so a server started by hand is stopped too. On Windows the desktop
-shortcuts `omp webchat` and `omp webchat (stop)` call the shim with `start` / `stop`.
+listening on the port, so a server started by hand is stopped too. A non-default port suffixes
+all three (`webchat-7791.pid`, `webchat-7791.log`, `webchat-7791.err.log`), so two bridges never
+overwrite each other's PID. On Windows the desktop
+shortcuts `omp webchat` and `omp webchat (stop)` call the shim with `start` / `stop`;
+`webchat.sh install` regenerates both from the current checkout path, so moving the clone does
+not mean editing shortcut properties by hand.
 
 Flags:
 

@@ -13,9 +13,13 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${OMP_WEBCHAT_PORT:-7788}"
 RUN_DIR="$ROOT/.run"
-PID_FILE="$RUN_DIR/webchat.pid"
-OUT_LOG="$RUN_DIR/webchat.log"
-ERR_LOG="$RUN_DIR/webchat.err.log"
+# One file set per port: two bridges (a second project, a scratch port) must not overwrite each
+# other's PID, or `stop` kills the wrong server.
+SUFFIX=""
+[ "$PORT" = 7788 ] || SUFFIX="-$PORT"
+PID_FILE="$RUN_DIR/webchat$SUFFIX.pid"
+OUT_LOG="$RUN_DIR/webchat$SUFFIX.log"
+ERR_LOG="$RUN_DIR/webchat$SUFFIX.err.log"
 URL="http://127.0.0.1:$PORT/"
 
 case "$(uname -s)" in
@@ -141,6 +145,15 @@ case "${1:-start}" in
 		stop
 		start
 		;;
+	install)
+		# Recreate the desktop shortcuts from this checkout's path.
+		if [ "$IS_WIN" != 1 ]; then
+			say "install only applies on Windows (desktop shortcuts)" >&2
+			exit 2
+		fi
+		WIN_ROOT="$(cygpath -w "$ROOT" 2>/dev/null || printf '%s' "$ROOT")"
+		MSYS_NO_PATHCONV=1 powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$ROOT/scripts/shortcuts.ps1" 2>/dev/null || printf '%s/scripts/shortcuts.ps1' "$ROOT")" -Root "$WIN_ROOT"
+		;;
 	status)
 		if serving; then
 			say "running: $URL (pid $(cat "$PID_FILE" 2>/dev/null || port_pids | tr '\n' ' '))"
@@ -150,7 +163,7 @@ case "${1:-start}" in
 		fi
 		;;
 	*)
-		say "usage: webchat.sh [start|stop|restart|status]" >&2
+		say "usage: webchat.sh [start|stop|restart|status|install]" >&2
 		exit 2
 		;;
-esac
+	esac
