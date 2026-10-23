@@ -16,8 +16,9 @@ const LABEL: Record<Phase, string> = {
 };
 
 /** The mockup's glyph per phase: sparkle (thinking), ring (tool/retry/compact), waveform
- *  (writing), drawn tick/cross (done/failed). All tinted by `--ph` through currentColor. */
-function Icon({ phase }: { phase: Phase }) {
+ *  (writing), drawn tick/cross (done/failed). All tinted by `--ph` through currentColor.
+ *  `idle` has no glyph, and the chip does not render the slot for it. */
+function Icon({ phase }: { phase: Exclude<Phase, "idle"> }) {
 	switch (phase) {
 		case "think":
 			return <Spark />;
@@ -31,8 +32,6 @@ function Icon({ phase }: { phase: Phase }) {
 			return <CrossDraw />;
 		case "done":
 			return <CheckDraw />;
-		default:
-			return null;
 	}
 }
 
@@ -76,10 +75,15 @@ export function PhaseChip() {
 			disabled={!tool}
 			title={tool ? `Running ${tool.name} — tap to jump to its card` : `Phase: ${LABEL[phase]}`}
 		>
-			<span className="pi" key={phase}>
-				<Icon phase={phase} />
-			</span>
-			<span className="pl" key={label}>
+			{/* Keys are namespaced, not bare values: `phase` and `label` are both "done" in the
+			    done state, and two siblings sharing a key make React treat them as one element —
+			    the stale icon then never unmounts and one piles up per turn. */}
+			{phase !== "idle" && (
+				<span className="pi" key={`icon-${phase}`}>
+					<Icon phase={phase} />
+				</span>
+			)}
+			<span className="pl" key={`label-${label}`}>
 				{label}
 			</span>
 			<Elapsed since={since} />

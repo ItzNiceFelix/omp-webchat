@@ -3378,11 +3378,15 @@ main {
 .send.stop::after {
 	content: "";
 	position: absolute;
-	left: 50%;
-	top: 50%;
+	/* Centred with `inset` + `margin: auto`, not `left/top: 50%` plus a negative margin: a
+	   pseudo-element is outside the global `* { box-sizing }` reset, so a 26px box with a 2px
+	   border is 30px wide and the negative margin was 2px short on both axes. `inset: 0` +
+	   auto margins centre the border box whatever its size. */
+	inset: 0;
 	width: 26px;
 	height: 26px;
-	margin: -13px 0 0 -13px;
+	margin: auto;
+	box-sizing: border-box;
 	border-radius: 50%;
 	border: 2px solid color-mix(in srgb, var(--ph) 22%, transparent);
 	border-top-color: var(--ph);
