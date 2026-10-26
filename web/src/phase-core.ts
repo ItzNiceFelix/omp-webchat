@@ -7,7 +7,7 @@
  */
 export type Phase = "idle" | "think" | "tool" | "write" | "retry" | "compact" | "error" | "done";
 
-/** How long the "done"/"failed" tint lingers after a turn settles (mockup: 1.9s). */
+/** How long the "done"/"failed" tint lingers after a turn settles. */
 export const PULSE_MS = 1900;
 
 export interface PhaseInput {

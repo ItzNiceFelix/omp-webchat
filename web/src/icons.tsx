@@ -1,7 +1,7 @@
 /**
- * The mockup's own indicator glyphs. Pure SVG/CSS and `currentColor`, so the chip, the tool
+ * The phase indicator glyphs. Pure SVG/CSS and `currentColor`, so the chip, the tool
  * card status and the composer all tint them from one place (`--ph` or the status colour).
- * Motion lives in styles.css under "mockup parity"; none of it runs under reduced motion.
+ * Motion lives in styles.css under "motion and glyph layer"; none of it runs under reduced motion.
  */
 export function Spark() {
 	return (
@@ -33,6 +33,21 @@ export function Dots() {
 			<i />
 		</span>
 	);
+}
+
+/** A 1px-bordered square: the `tool` phase. Breathes so it never reads as a static checkbox. */
+export function Block() {
+	return <span className="mk-block" aria-hidden="true" />;
+}
+
+/** A dashed circle: the `compact` phase. Rotates so the dashes travel. */
+export function Dash() {
+	return <span className="mk-dash" aria-hidden="true" />;
+}
+
+/** A 1px square dot: `idle`. Breathes, so even "ready" is visibly alive. */
+export function Dot() {
+	return <span className="mk-dot" aria-hidden="true" />;
 }
 
 /** Stroke-drawn tick: `pathLength=1` lets one dash animation draw it at any size. */

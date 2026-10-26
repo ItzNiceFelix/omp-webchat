@@ -1,10 +1,27 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { store } from "../store";
 import { useStore } from "../useStore";
 import type { Message } from "../types";
 import { MessageRow } from "./MessageRow";
 
 const BOTTOM_SLACK = 120;
+
+/**
+ * What kind of row this is, for the spine node colour and the birth animation.
+ * Kept presentational: it reads only fields MessageRow already branches on.
+ */
+function rowKind(message: Message): string {
+	if (message.local === "error") return "error";
+	// Runtime notices are not part of the turn timeline; the spine skips them entirely.
+	if (message.local === "notice" || message.role === "custom") return "system";
+	if (message.role === "user") return "user";
+	const blocks = Array.isArray(message.content) ? message.content : [];
+	const hasTool = blocks.some((block) => block?.type === "toolCall");
+	if (hasTool) return "tool";
+	const hasThinking = blocks.some((block) => block?.type === "thinking");
+	if (hasThinking) return "think";
+	return "text";
+}
 
 /** Stable row identity: survives "load earlier" so the anchor element can be found again. */
 function rowKey(message: Message): string {
@@ -89,16 +106,24 @@ export function Transcript() {
 				</button>
 			)}
 			{note && <div className="message system">{note}</div>}
-			{messages.slice(start).map((message) => {
+			{messages.slice(start).map((message, index) => {
 				const key = rowKey(message);
+				// --i drives the card-birth stagger in styles.css. It is capped so a long backlog
+				// does not make the newest row wait seconds before it can appear.
 				return (
-					<div className="row" data-row={key} key={key}>
+					<div className="row" data-row={key} data-kind={rowKind(message)} style={{ "--i": Math.min(index, 6) } as CSSProperties} key={key}>
 						<MessageRow message={message} />
 					</div>
 				);
 			})}
 			{streaming && (
-				<div className="row" data-row="streaming" key="streaming">
+				<div
+					className="row"
+					data-row="streaming"
+					data-kind="text"
+					style={{ "--i": Math.min(messages.length - start, 6) } as CSSProperties}
+					key="streaming"
+				>
 					<MessageRow message={streaming} streaming />
 				</div>
 			)}

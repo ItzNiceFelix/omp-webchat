@@ -88,7 +88,7 @@ export function ThinkingBlock({ text, streaming }: { text: string; streaming: bo
 				: `Thought for ${seconds(ms)}`;
 
 	return (
-		<div className={`thinking rise${streaming ? " streaming" : ""}`}>
+		<div className={`thinking${streaming ? " streaming" : ""}`}>
 			<button
 				type="button"
 				aria-expanded={open}

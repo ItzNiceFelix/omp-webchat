@@ -184,7 +184,7 @@ export function Composer() {
 			{attachments.length > 0 && (
 				<div className="attachments">
 					{attachments.map((attachment) => (
-						<div className={`att${attachment.image ? " image" : " file"} rise`} key={attachment.id}>
+						<div className={`att${attachment.image ? " image" : " file"}`} key={attachment.id}>
 							{attachment.image ? (
 								<img src={`data:${attachment.image.mimeType};base64,${attachment.image.data}`} alt={attachment.name} />
 							) : (

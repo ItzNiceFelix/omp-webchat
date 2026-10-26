@@ -26,26 +26,28 @@ ships with the plugin. GitHub Actions rebuilds it on every change under `web/`.
 | `src/useStore.ts` | `useSyncExternalStore` binding; components subscribe to one slice |
 | `src/markdown.ts` | `marked` → DOMPurify, plus an LRU so an unchanged block is never re-parsed |
 | `src/components/` | header, sidebar, transcript, message rows, tool cards, composer, palette, agents, dialogs, modals, live voice, toasts |
-| `src/styles.css` | the design system (Stitch surface/cyan/violet tokens) and the responsive layout |
-| `src/fonts.ts` | bundled Geist + Inter (variable) and JetBrains Mono (woff2) |
+| `src/styles.css` | the design system (one dark matte palette row, one radius) and the responsive layout |
+| `src/fonts.ts` | bundled IBM Plex Sans and JetBrains Mono (woff2) |
 
 ## Mobile first
 
 The shell is built for a phone and widened for a desktop (`@media (min-width: 1100px)` turns the
 side panels into grid columns):
 
-- **Glass surfaces** — only the fixed chrome (header, composer, modal backdrop) uses
-  `backdrop-filter`; the transcript is opaque, because a blurred layer inside the scrolling list is
-  the dominant scroll cost on a phone.
-- **Motion** — sheets slide up (from the right for agents), cards `rise` in, disclosure chevrons
-  rotate, the tool/thinking body expands on a `grid-template-rows` transition (lazily mounted,
-  then kept so closing animates too), and the streaming caret is drawn by CSS on the last block.
-  Everything is transform/opacity only and collapses under `prefers-reduced-motion`.
-- **Working indicator** — a 2 px phase-tinted strip plus a masked conic border on the composer,
-  driven by `data-phase` and animated only while a turn runs.
+- **No glass** — there is no `backdrop-filter` anywhere. Surfaces are opaque and separated by a
+  1px border plus the card/bg step, which is both the matte look and the cheaper scroll path.
+- **Motion** — sheets slide up (from the right for agents), disclosure chevrons rotate, the
+  tool/thinking body expands on a `grid-template-rows` transition (lazily mounted, then kept so
+  closing animates too), and the streaming caret is drawn by CSS on the last block. Rows are not
+  faded in as a group: each one is born from the timeline (spine, node, stub, then a clip-path
+  card wipe) at a delay derived from its own index. Everything is transform/opacity/clip-path
+  only and collapses under `prefers-reduced-motion`, pseudo-elements included.
+- **Working indicator** — a 1px accent rail that draws across the composer's top edge while a
+  turn runs, driven by `data-phase`. It is a `scaleX` on one pseudo-element, so it costs the
+  compositor nothing to keep running.
 - **Turn phase** — one derived primitive, `store.phase()`, answers "what is omp doing" for every
   surface at once: the composer's phase chip (word + elapsed + queue count), the root
-  `data-phase` attribute, the ambient tint (`.amb`), the working strip and the composer ring.
+  `data-phase` attribute and the composer rail.
   Order: `retry` → `compact` → `tool` → `think`/`write` (block type, only while `busy`) →
   `done`/`error` pulse (1.9 s) → `idle`. Everything comes from frames the store already routes;
   the bridge needs no new frame. `compacting` is tracked from `auto_compaction_start/end`

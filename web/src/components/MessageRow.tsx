@@ -110,7 +110,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	if (message.local === "card") {
 		return (
-			<article className="message card rise">
+			<article className="message card">
 				<h4>{message.toolName ?? "card"}</h4>
 				<div className="blocks">
 					{blocks.map((block, index) => (
@@ -122,7 +122,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	if (message.local === "btw") {
 		return (
-			<article className="message btw rise">
+			<article className="message btw">
 				<div className="who">btw side question</div>
 				<div className="blocks">
 					{blocks.map((block, index) => (
@@ -135,7 +135,7 @@ export const MessageRow = memo(function MessageRow({ message, streaming = false 
 	}
 	if (message.role === "user") {
 		return (
-			<article className={`message user${message.optimistic ? " optimistic" : ""}${message.optimistic ? " send-in" : ""}`}>
+			<article className={`message user${message.optimistic ? " optimistic" : ""}`}>
 				<div className="turn-meta">
 					<b>You</b>
 					<span>·</span>

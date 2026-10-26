@@ -66,7 +66,7 @@ function Elapsed({ entry }: { entry: ToolEntry }) {
 }
 
 /**
- * Tool card. Without opening it you see what the mockup shows: the arguments typed in, a ring
+ * Tool card. Without opening it you see the arguments typed in, a ring
  * (or bouncing dots while the arguments are still being prepared) with a ticking timer, the
  * last few output lines fading in, then a drawn tick (or a shaken cross) on settle. The chevron
  * still opens the full arguments and output on a grid-rows transition (lazily mounted on first
@@ -107,7 +107,7 @@ export const ToolCard = memo(function ToolCard({ entry }: { entry: ToolEntry }) 
 	};
 
 	return (
-		<div className={`tool ${status}${flash ? ` ${flash}` : ""} rise`} data-tool-id={entry.id}>
+		<div className={`tool ${status}${flash ? ` ${flash}` : ""}`} data-tool-id={entry.id}>
 			<button type="button" className="tool-head" aria-expanded={open} onClick={toggle}>
 				<span className="tool-icon">
 					<Terminal size={14} />

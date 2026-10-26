@@ -101,7 +101,7 @@ export class Store {
 	retrying = false;
 	/** Set by the compaction frames; `session.isCompacting` lags until the next `get_state`. */
 	compacting = false;
-	/** Transient turn-end tint (mockup's "done"/"error" ambient), expired by wall clock. */
+	/** Transient turn-end tint for "done"/"error", expired by wall clock. */
 	pulse: { kind: "done" | "error"; at: number } | null = null;
 	/** When the current turn began; a failed tool after this point marks the turn as failed. */
 	turnStartedAt = 0;

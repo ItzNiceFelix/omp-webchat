@@ -125,9 +125,10 @@ unhashed is sent `cache-control: no-store`, while `assets/*` keeps vite's conten
 `/api/*` and `/ws` on its own origin, so a full session needs the bridge (`web/dist` behind
 `server.ts`), not vite's port.
 
-Dark console theme on the Stitch surface scale (surface-container-lowest → highest), cyan as the
-live accent and violet for reasoning, Geist Variable + Inter Variable + JetBrains Mono (all bundled
-as woff2, no font CDN), laid out as header / sidebar / chat / agents drawer.
+Solid dark matte: one palette row, one radius, no gradients, no blur, no glow. Depth is a 1px
+border and the card/bg step. IBM Plex Sans + IBM Plex Mono, bundled as woff2 (no font CDN), laid
+out as header / sidebar / chat / agents drawer. Every status is a drawn SVG glyph, never an emoji,
+and every glyph change cross-fades.
 
 - **Layout** — only the chat scrolls: the composer and the sidebar never move, and the page itself
   has no scrollbar (`min-height: 0` grid tracks, `overflow: hidden` shell).
@@ -136,10 +137,20 @@ as woff2, no font CDN), laid out as header / sidebar / chat / agents drawer.
   shell with its own `copy` button (delegated, since the HTML comes from sanitized markdown) and
   per-turn usage.
 - **Tool cards** — header carries name, intent, status pill and duration; the body is a two-column
-  grid (arguments | output/stream) from 700px, one column on a phone.
-- **Motion** — indeterminate aurora top bar while the agent works, a masked conic aurora border on
-  the composer while `data-busy="true"`, rise-in for new rows, pulsing stream orb; all
-  compositor-only (`transform`/`opacity`) and disabled under `prefers-reduced-motion`.
+  grid (arguments | output/stream) from 700px, one column on a phone. Only a failed card gets a
+  coloured border: success is the normal case and is carried by the tick glyph alone.
+- **Motion** — every row is born from the timeline instead of appearing: a spine segment draws
+  down from the previous row (110ms), a node lands at its head (150ms), a stub reaches into the
+  card (190ms), and the card opens from that stub as a clip-path wipe (290ms). One shared
+  `--i` index per row sequences them with CSS `calc`; nothing is measured in JS. All
+  compositor-only (`transform`/`opacity`/`clip-path`) and fully disabled under
+  `prefers-reduced-motion`, including the pseudo-elements.
+- **Phase chip** — eight glyphs (idle, think, tool, write, done, error, stop, voice) in one 14px
+  slot, cross-faded on `opacity`/`transform` with the outgoing glyph removed from layout by the
+  time the new one lands. A burst of phases that arrives inside the 160ms swap window overwrites
+  the pending phase instead of queueing, so a fast `think → tool → write` renders the first and
+  the last and never the ones in between. The decision logic is pure and lives in
+  `web/src/phase-swap.ts` with its own test.
 - **Composer** — quick strip (working/ready, context buffer, reasoning, live voice) over a single
   rounded box with attach, live voice, steer, context ring, stop and send. `Enter` sends,
   `Shift+Enter` newline, `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens
