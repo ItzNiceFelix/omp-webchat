@@ -36,7 +36,7 @@
 	--err: #ffb4ab;
 	--amber: #f5c451;
 	--display: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
-	--sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+	--sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
 	--mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 	--r-sm: 8px;
 	--r-md: 12px;
@@ -54,7 +54,6 @@
 	--ph-line: color-mix(in srgb, var(--ph) 40%, var(--line));
 	--ph-soft: var(--surface-2);
 	--ph-soft: color-mix(in srgb, var(--ph) 13%, transparent);
-	--r-xl: 22px;
 }
 
 * {
@@ -133,7 +132,7 @@ kbd {
 }
 
 .mono {
-	font: 10px var(--mono);
+	font: 11px var(--mono);
 	color: var(--faint);
 }
 
@@ -423,6 +422,11 @@ kbd {
 	animation: pulse 2.4s ease-in-out infinite;
 }
 
+/* Idle has no phase to report, so the chip is the only thing that speaks. */
+.app:not([data-phase]) .conn.running {
+	animation: none;
+}
+
 .conn.starting,
 .conn.connecting {
 	background: var(--amber);
@@ -629,6 +633,10 @@ main {
 	inset: 0;
 	width: 45%;
 	background: linear-gradient(90deg, transparent, var(--ph), transparent);
+}
+
+/* The bar is opacity 0 when idle; an infinite sweep behind it still ticks the compositor. */
+.working.on .sweep {
 	animation: sweep 1.6s cubic-bezier(0.4, 0.1, 0.6, 0.9) infinite;
 }
 
@@ -717,6 +725,9 @@ main {
 	mask-composite: exclude;
 	opacity: 0.45;
 	pointer-events: none;
+}
+
+.app[data-phase] .new-chat::after {
 	animation: aurora-shift 6s linear infinite;
 }
 
@@ -1172,7 +1183,7 @@ main {
 	max-width: 88%;
 	background: var(--surface-3);
 	border: 1px solid var(--line);
-	border-radius: 20px 20px 6px 20px;
+	border-radius: 16px 16px 6px 16px;
 	padding: 10px 13px;
 	box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
@@ -1316,7 +1327,7 @@ main {
 .usage {
 	margin-top: 7px;
 	color: var(--faint);
-	font: 10px var(--mono);
+	font: 11px var(--mono);
 }
 
 .block-image {
@@ -1834,7 +1845,7 @@ main {
 .col-label {
 	margin-bottom: 4px;
 	color: var(--faint);
-	font: 9px var(--mono);
+	font: 10px var(--mono);
 	text-transform: uppercase;
 	letter-spacing: 0.09em;
 }
@@ -2484,7 +2495,7 @@ main {
 	max-width: var(--column-max);
 	margin: 5px auto 0;
 	color: var(--faint);
-	font: 9.5px var(--mono);
+	font: 10.5px var(--mono);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -3143,9 +3154,9 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
 	* {
-		animation-duration: 0.01ms !important;
-		animation-iteration-count: 1 !important;
-		transition-duration: 0.01ms !important;
+		/* A 0.01ms duration still schedules compositor frames; none does not. */
+		animation: none !important;
+		transition: none !important;
 	}
 
 	.working .sweep {
@@ -3460,6 +3471,10 @@ main {
 	syntax: "<color>";
 	inherits: true;
 	initial-value: #5b6cff;
+}
+
+.app:not([data-phase]) .amb {
+	display: none;
 }
 
 .amb {
@@ -3923,5 +3938,29 @@ main {
 
 	.mk-ck path {
 		stroke-dashoffset: 0;
+	}
+}
+
+/* ---------------------------------------------------------------- 9/10 pass */
+
+/* A masked conic repaints every frame. On touch a solid phase ring says the same for free,
+   and an 18px backdrop blur over a scrolling transcript is the costliest thing on the page. */
+.app[data-touch="true"] {
+	--blur: saturate(1.2) blur(12px);
+}
+
+.app[data-touch="true"][data-phase] .composer-box::after {
+	animation: none;
+	background: var(--ph-line);
+}
+
+/* At 360px the context badge is the first thing to go: the model name still identifies the row. */
+@media (max-width: 420px) {
+	.pill-badge {
+		display: none;
+	}
+
+	.model-pill {
+		max-width: 26vw;
 	}
 }
