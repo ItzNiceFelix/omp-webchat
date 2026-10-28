@@ -30,8 +30,9 @@ Without `web/dist/index.html` the server answers `GET /` (and any other request 
 
 ### Start / stop
 
-`scripts/webchat.sh` wraps the spawn so the bridge survives the terminal that launched it, and
-`scripts/webchat.cmd` is the double-click shim (Git Bash, argument forwarded):
+`scripts/webchat.sh` wraps the spawn so the bridge survives the terminal that launched it.
+Two Windows entry points forward to it: `scripts/webchat.vbs` (windowless, used by the desktop
+shortcuts) and `scripts/webchat.cmd` (a plain double-click from Explorer, console expected):
 
 ```bash
 bash scripts/webchat.sh start     # start if needed, wait for the port, open the browser
@@ -45,10 +46,14 @@ bash scripts/webchat.sh install   # (re)create the two desktop shortcuts from th
 (gitignored), and its PID lands in `.run/webchat.pid`; `stop` falls back to whatever PID is
 listening on the port, so a server started by hand is stopped too. A non-default port suffixes
 all three (`webchat-7791.pid`, `webchat-7791.log`, `webchat-7791.err.log`), so two bridges never
-overwrite each other's PID. On Windows the desktop
-shortcuts `omp webchat` and `omp webchat (stop)` call the shim with `start` / `stop`;
-`webchat.sh install` regenerates both from the current checkout path, so moving the clone does
-not mean editing shortcut properties by hand.
+overwrite each other's PID. On Windows the desktop shortcuts `omp webchat` and `omp webchat
+(stop)` run `scripts/webchat.vbs` through `wscript.exe` with `start` / `stop`. A shortcut cannot
+hide a console (only minimise it), and the bridge is already detached, so a .cmd target left two
+lit cmd icons in the taskbar for nothing; `wscript` is a GUI host and shows no window, and a
+failure becomes a message box instead of console text nobody would see. `scripts/webchat.cmd` is
+still there for a plain double-click from Explorer. `webchat.sh install` regenerates both
+shortcuts from the current checkout path, so moving the clone does not mean editing shortcut
+properties by hand.
 
 Flags:
 
@@ -145,12 +150,13 @@ and every glyph change cross-fades.
   `--i` index per row sequences them with CSS `calc`; nothing is measured in JS. All
   compositor-only (`transform`/`opacity`/`clip-path`) and fully disabled under
   `prefers-reduced-motion`, including the pseudo-elements.
-- **Phase chip** — eight glyphs (idle, think, tool, write, done, error, stop, voice) in one 14px
-  slot, cross-faded on `opacity`/`transform` with the outgoing glyph removed from layout by the
-  time the new one lands. A burst of phases that arrives inside the 160ms swap window overwrites
-  the pending phase instead of queueing, so a fast `think → tool → write` renders the first and
-  the last and never the ones in between. The decision logic is pure and lives in
-  `web/src/phase-swap.ts` with its own test.
+- **Phase chip** — eight glyphs (idle, think, tool, write, retry, compact, error, done) in one
+  14px slot, cross-faded on `opacity`/`transform` with the outgoing glyph removed from layout by
+  the time the new one lands. A burst of phases that arrives inside the 160ms swap window
+  overwrites the pending phase instead of queueing, so a fast `think → tool → write` renders the
+  first and the last and never the ones in between. The decision logic is pure and lives in
+  `web/src/phase-swap.ts` with its own test. The chip's width is fixed: a phase change never
+  moves the pills beside it.
 - **Composer** — quick strip (working/ready, context buffer, reasoning, live voice) over a single
   rounded box with attach, live voice, steer, context ring, stop and send. `Enter` sends,
   `Shift+Enter` newline, `Esc` stops (`abort_and_restore_queue` hands queued text back), `/` opens
