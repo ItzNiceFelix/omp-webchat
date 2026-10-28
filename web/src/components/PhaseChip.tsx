@@ -49,8 +49,12 @@ function useSkippingPhase(phase: Phase): Phase {
 
 	useEffect(() => {
 		const reduced = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		if (reduced) {
-			// No swap window: paint synchronously so the chip is never behind the runtime.
+		// The swap window exists to collapse a burst of running phases. A settle is not part of
+		// that burst: holding it back painted a stale "writing" after the turn had ended, with
+		// the pulse as its clock, so the chip showed a running word and a 0.0s beside "done".
+		if (reduced || phase === "idle" || phase === "done" || phase === "error") {
+			window.clearTimeout(timer.current ?? undefined);
+			timer.current = null;
 			setSwap(initialSwap(phase));
 			return;
 		}
@@ -119,7 +123,6 @@ export function PhaseChip() {
 	const shown = useSkippingPhase(phase);
 	const since = useStore((select) => select.phaseSince());
 	const tool = useStore((select) => select.runningTool());
-	const queued = useStore((select) => select.queue.steering.length + select.queue.followUp.length);
 	const label = shown === "tool" && tool?.name ? `tool · ${tool.name}` : LABEL[shown];
 
 	const jump = () => {
@@ -146,7 +149,6 @@ export function PhaseChip() {
 			<span className="pl">{label}</span>
 			{/* A frozen "0.0s" next to "ready" is noise, so the slot is absent, not empty. */}
 			{TIMED[shown] && <Elapsed since={since} />}
-			{queued > 0 && <span className="pq">· {queued} queued</span>}
 		</button>
 	);
 }

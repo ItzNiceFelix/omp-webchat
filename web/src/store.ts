@@ -257,13 +257,22 @@ export class Store {
 				this.emit();
 				return;
 			case "agent_start":
+				// The runtime emits this once per model step inside one turn, so the clock only
+				// starts when the session was idle: restarting it on every step reset the chip
+				// to 0.0s mid-turn while the word stayed "thinking".
+				if (!this.busy) this.turnStartedAt = Date.now();
 				this.busy = true;
 				this.pulse = null;
-				this.turnStartedAt = Date.now();
 				this.emit();
 				return;
 			case "agent_end": {
 				this.busy = false;
+				// A terminal end cannot be inside a retry or a compaction; a dropped
+				// `auto_retry_end`/`auto_compaction_end` would otherwise pin the chip forever.
+				if (frame.yielded !== false) {
+					this.retrying = false;
+					this.compacting = false;
+				}
 				if (frame.yielded === false) this.notice("agent yielded for retry/compaction — continuing");
 				else this.settlePulse(false);
 				void this.refreshState();
@@ -276,10 +285,16 @@ export class Store {
 				return;
 			}
 			case "session_settled":
-			case "turn_end":
 				this.busy = false;
 				this.settlePulse(false);
 				this.emit();
+				void this.refreshState();
+				return;
+			case "turn_end":
+				// One model step, not one conversation turn: a tool-using turn emits this
+				// between every step. Settling here flashed "done" in the middle of a running
+				// agent and then went back to "thinking", which is exactly the false status
+				// the chip must never show. `agent_end`/`session_settled` own the settle.
 				void this.refreshState();
 				return;
 			case "message_start":
@@ -347,15 +362,21 @@ export class Store {
 				this.notice(`${type} ${JSON.stringify({ from: frame.from, to: frame.to, model: frame.model })}`);
 				return;
 			case "prompt_result": {
-				this.busy = false;
-				this.settlePulse(frame.status === "error");
-				void this.refreshState();
+				// The response answers "was the prompt admitted", not "is the turn over": it
+				// lands before the first `agent_start`. Clearing `busy` here made the chip drop
+				// to "ready" and climb back to "thinking" on every send. A rejection is the only
+				// outcome that ends the turn.
 				if (frame.status === "error") {
+					this.busy = false;
+					this.settlePulse(true);
 					const message = asString(asRecord(frame.error)?.message) ?? "unknown error";
 					this.notice(`turn failed: ${message}`, "error");
 					this.notifier.ping("error", "omp turn failed", message);
+					void this.refreshState();
+					this.emit();
+					return;
 				}
-				this.emit();
+				void this.refreshState();
 				return;
 			}
 			case "irc_message":
@@ -582,12 +603,13 @@ export class Store {
 		});
 	}
 
-	/** Wall-clock start of the current phase, for the elapsed counter; null when untimed. */
+	/** Wall-clock start of the current phase, for the elapsed counter; null when untimed.
+	 *  The counter is the turn's own clock, not the current word's: a tool-using turn passes
+	 *  through think → tool → think → write, and restarting at 0.0s on each step made the
+	 *  number contradict the word beside it and jump backwards. */
 	phaseSince(): number | null {
 		if (this.retrying || this.compacting || this.session?.isCompacting) return null;
-		const tool = this.runningTool();
-		if (tool) return tool.start;
-		if (this.busy) return this.streaming?.timestamp ?? null;
+		if (this.busy) return this.turnStartedAt || this.streaming?.timestamp || null;
 		// Only a live pulse is timed: a stale stamp would keep counting after the tint faded.
 		return this.pulse && Date.now() - this.pulse.at < PULSE_MS ? this.pulse.at : null;
 	}
@@ -642,10 +664,11 @@ export class Store {
 			});
 			this.session = data;
 			if (data.queuedMessages) this.queue = data.queuedMessages;
-			// The runtime keeps `isStreaming` true while a tool it is awaiting (a subagent
-			// `wait`, for example) still runs, so that — plus an unsettled session — is what
-			// the progress indicator must follow, not the last message frame we saw.
-			this.busy = Boolean(data.isStreaming) || data.isSettled === false;
+			// A live turn is `isStreaming` and nothing else. `isSettled` is false for a queued
+			// message or pending async work too, and none of those mean omp is thinking: reading
+			// it here made a settled session wear the "thinking" chip until the next frame
+			// happened to clear the flag. Queue depth has its own pill.
+			this.busy = Boolean(data.isStreaming);
 			this.emit();
 		} catch (err) {
 			this.toast(`state unavailable: ${messageOf(err)}`, "warn");
@@ -833,6 +856,12 @@ export class Store {
 			this.appendRow({ role: "user", optimistic: true, content: [{ type: "text", text }], timestamp: Date.now() });
 			this.atBottom = true;
 			this.smoothNonce++;
+			// The reader already sees their own row, so the chip must already say the turn is
+			// running: waiting for `agent_start` showed "ready" under a message that was being
+			// processed. `prompt_result`/`agent_end` clear it if the runtime refuses.
+			this.busy = true;
+			this.pulse = null;
+			this.turnStartedAt = Date.now();
 			this.emit();
 		}
 		try {
@@ -841,9 +870,16 @@ export class Store {
 				// admission raced a stale busy flag: queue explicitly instead of failing
 				frame = await this.client.cmd({ ...command, streamingBehavior: behavior ?? "followUp" });
 			}
-			if (frame.success === false) this.toast(`prompt rejected: ${String(frame.error)}`, "error");
+			if (frame.success === false) {
+				this.toast(`prompt rejected: ${String(frame.error)}`, "error");
+				// The optimistic `busy` above must not outlive a prompt the runtime refused.
+				this.busy = false;
+				this.emit();
+			}
 		} catch (err) {
+			this.busy = false;
 			this.toast(`prompt failed: ${messageOf(err)}`, "error");
+			this.emit();
 		}
 	}
 

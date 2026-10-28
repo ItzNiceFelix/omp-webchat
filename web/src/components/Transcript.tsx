@@ -48,6 +48,7 @@ export function Transcript() {
 	const smoothNonce = useStore((select) => select.smoothNonce);
 
 	const box = useRef<HTMLDivElement>(null);
+	const content = useRef<HTMLDivElement>(null);
 	const anchor = useRef<{ key: string; offset: number } | null>(null);
 	const lastSmooth = useRef(smoothNonce);
 	const frame = useRef(0);
@@ -69,6 +70,29 @@ export function Transcript() {
 			node.removeEventListener("scroll", onScroll);
 			if (frame.current) cancelAnimationFrame(frame.current);
 		};
+	}, []);
+
+	/**
+	 * Content that grows without a new message still needs to stay pinned: a tool card that
+	 * flips to `done` and shows its output, a markdown block finishing, an image settling.
+	 * React commits that growth after the layout effect above has run, and the message object
+	 * did not change, so nothing scrolled and the transcript stopped a screen short of the
+	 * bottom. The observer sees the height, not the data.
+	 */
+	useEffect(() => {
+		const node = box.current;
+		const inner = content.current;
+		if (!node || !inner) return;
+		const observer = new ResizeObserver(() => {
+			if (!store.atBottom) return;
+			const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
+			if (gap <= 0) return;
+			// A settling card is a visible jump, so it glides. A stream delta is a line or two,
+			// and animating that fights the next delta, so it pins instead.
+			node.scrollTo({ top: node.scrollHeight, behavior: gap > 48 ? "smooth" : "auto" });
+		});
+		observer.observe(inner);
+		return () => observer.disconnect();
 	}, []);
 
 	useLayoutEffect(() => {
@@ -106,47 +130,51 @@ export function Transcript() {
 				</button>
 			)}
 			{note && <div className="message system">{note}</div>}
-			{messages.slice(start).map((message, index) => {
-				const key = rowKey(message);
-				// --i drives the card-birth stagger in styles.css. It is capped so a long backlog
-				// does not make the newest row wait seconds before it can appear.
-				return (
-					<div className="row" data-row={key} data-kind={rowKind(message)} style={{ "--i": Math.min(index, 6) } as CSSProperties} key={key}>
-						<MessageRow message={message} />
+			{/* Observed by the transcript's ResizeObserver: rows grow after commit (tool output,
+			    markdown, images), and that growth has no message change to hang a scroll on. */}
+			<div className="scroll-body" ref={content}>
+				{messages.slice(start).map((message, index) => {
+					const key = rowKey(message);
+					// --i drives the card-birth stagger in styles.css. It is capped so a long backlog
+					// does not make the newest row wait seconds before it can appear.
+					return (
+						<div className="row" data-row={key} data-kind={rowKind(message)} style={{ "--i": Math.min(index, 6) } as CSSProperties} key={key}>
+							<MessageRow message={message} />
+						</div>
+					);
+				})}
+				{streaming && (
+					<div
+						className="row"
+						data-row="streaming"
+						data-kind="text"
+						style={{ "--i": Math.min(messages.length - start, 6) } as CSSProperties}
+						key="streaming"
+					>
+						<MessageRow message={streaming} streaming />
 					</div>
-				);
-			})}
-			{streaming && (
-				<div
-					className="row"
-					data-row="streaming"
-					data-kind="text"
-					style={{ "--i": Math.min(messages.length - start, 6) } as CSSProperties}
-					key="streaming"
-				>
-					<MessageRow message={streaming} streaming />
-				</div>
-			)}
-			{!messages.length && !streaming && (
-				<div className="welcome">
-					<h3>omp webchat</h3>
-					<p>
-						This tab drives the runtime directly: streaming turns, tool cards, dialogs, slash commands, subagents and live voice all come from{" "}
-						<code>omp --mode rpc-ui</code>. Type a message, or <kbd>/</kbd> for the command palette.
-					</p>
-					<ul>
-						<li>
-							<kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline
-						</li>
-						<li>
-							<kbd>Esc</kbd> abort the running turn
-						</li>
-						<li>
-							<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>K</kbd> command palette
-						</li>
-					</ul>
-				</div>
-			)}
+				)}
+				{!messages.length && !streaming && (
+					<div className="welcome">
+						<h3>omp webchat</h3>
+						<p>
+							This tab drives the runtime directly: streaming turns, tool cards, dialogs, slash commands, subagents and live voice all come from{" "}
+							<code>omp --mode rpc-ui</code>. Type a message, or <kbd>/</kbd> for the command palette.
+						</p>
+						<ul>
+							<li>
+								<kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline
+							</li>
+							<li>
+								<kbd>Esc</kbd> abort the running turn
+							</li>
+							<li>
+								<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>K</kbd> command palette
+							</li>
+						</ul>
+					</div>
+				)}
+			</div>
 			{pendingNew > 0 && (
 				<button type="button" className="new-pill" onClick={() => store.markRead()}>
 					{pendingNew} new

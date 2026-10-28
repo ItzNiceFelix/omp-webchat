@@ -40,6 +40,14 @@ test("a tool call awaiting start is the tool phase", () => {
 	assert.equal(derivePhase({ ...base, busy: true, toolPending: true, lastBlock: "toolCall" }), "tool");
 });
 
+test("a stale tool entry cannot outrank a settled turn", () => {
+	// A missed `tool_execution_end` (socket drop, aborted turn) leaves the tools map running.
+	// The turn is over, so the chip must say done or idle, never "tool".
+	assert.equal(derivePhase({ ...base, toolRunning: true }), "idle");
+	assert.equal(derivePhase({ ...base, toolRunning: true, pulse: { kind: "done", at: 10_000 }, now: 10_200 }), "done");
+	assert.equal(derivePhase({ ...base, toolPending: true, lastBlock: "toolCall" }), "idle");
+});
+
 test("a settled tool call falls back to the model composing its next step", () => {
 	assert.equal(derivePhase({ ...base, busy: true, lastBlock: "toolCall" }), "think");
 });

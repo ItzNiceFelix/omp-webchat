@@ -44,15 +44,30 @@ side panels into grid columns):
   only and collapses under `prefers-reduced-motion`, pseudo-elements included.
 - **Working indicator** — a 1px accent rail that draws across the composer's top edge while a
   turn runs, driven by `data-phase`. It is a `scaleX` on one pseudo-element, so it costs the
-  compositor nothing to keep running.
+  compositor nothing to keep running, and it runs on touch exactly as on a desktop.
+- **Same content on both** — a phone drops no information, only width: the timeline rail is
+  clamped into the 16px gutter instead of sitting off-screen, the buffer pill stays in the strip,
+  tool intent and palette descriptions truncate instead of disappearing, and the composer hint
+  returns while a turn runs. The one control that only exists on a desktop is the keyboard hint
+  at rest, because a phone has no keyboard.
 - **Turn phase** — one derived primitive, `store.phase()`, answers "what is omp doing" for every
-  surface at once: the composer's phase chip (word + elapsed + queue count), the root
-  `data-phase` attribute and the composer rail.
+  surface at once: the composer's phase chip (word + turn elapsed, fixed width), the root
+  `data-phase` attribute and the composer rail. Queue depth is a separate pill at the end of the
+  strip.
   Order: `retry` → `compact` → `tool` → `think`/`write` (block type, only while `busy`) →
-  `done`/`error` pulse (1.9 s) → `idle`. Everything comes from frames the store already routes;
-  the bridge needs no new frame. `compacting` is tracked from `auto_compaction_start/end`
-  because `session.isCompacting` only arrives with the *next* `get_state`. The derivation is
-  pure (`phase-core.ts`) and covered by `npm test`.
+  `done`/`error` pulse (1.9 s) → `idle`. Only retry and compaction may report a phase without a
+  live turn: the streaming message and the tools map both outlive `agent_end`, so a stale entry
+  must never keep the chip saying `tool` or `writing`. `busy` is `isStreaming` and nothing else
+  (`isSettled` is also false for a queued message), `turn_end` is a model step and not the end of
+  the turn, and `prompt_result` only reports admission. The elapsed number is the turn's own
+  clock: a tool-using turn passes think → tool → think → write, and restarting the number on each
+  step made it contradict the word beside it and jump backwards. A settle (`done`/`error`) paints
+  immediately instead of waiting for the swap window, so a finished turn never wears a running
+  word.
+  Everything comes from frames the store already routes; the bridge needs no new frame.
+  `compacting` is tracked from `auto_compaction_start/end` because `session.isCompacting` only
+  arrives with the *next* `get_state`. The derivation is pure (`phase-core.ts`) and covered by
+  `npm test`.
 - **Context usage** — a ring + percentage beside the send button; tap for tokens, window,
   remaining and throughput. The header shows the model and thinking pills, and the composer's quick
   strip shows the free context buffer.

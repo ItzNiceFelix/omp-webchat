@@ -29,14 +29,15 @@ export interface PhaseInput {
 
 /** First match wins. Order is the contract: retry and compaction suspend the turn, a running
  *  tool is later than the block that started it, and a stale pulse must not outlive PULSE_MS.
- *  The block type only counts while the turn runs: a leftover `streaming` message must never
- *  keep the chip saying "writing" after the turn settled. */
+ *  Nothing but retry/compaction may report a phase without a live turn: `streaming` and the
+ *  tools map outlive the turn by design (they are cleared by later frames, not by `agent_end`),
+ *  so a missed or reordered frame must not pin the chip to "tool" or "writing" while omp is
+ *  idle. That is what made the chip say "thinking" on a settled turn. */
 export function derivePhase(input: PhaseInput): Phase {
 	if (input.retrying) return "retry";
 	if (input.compacting) return "compact";
-	if (input.toolRunning || input.toolPending) return "tool";
 	if (input.busy) {
-		if (input.lastBlock === "thinking") return "think";
+		if (input.toolRunning || input.toolPending) return "tool";
 		if (input.lastBlock === "text") return "write";
 		// A settled tool call is still the last block until the model writes again; the tool is
 		// no longer running, so this is the model composing its next step.

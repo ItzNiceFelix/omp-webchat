@@ -33,6 +33,7 @@ export function Composer() {
 	const busy = useStore((select) => select.busy);
 	const commands = useStore((select) => select.commands);
 	const liveActive = useStore((select) => select.liveActive());
+	const queued = useStore((select) => select.queue.steering.length + select.queue.followUp.length);
 
 	const [paletteIndex, setPaletteIndex] = useState(0);
 	const [steer, setSteer] = useState(false);
@@ -170,7 +171,7 @@ export function Composer() {
 				<PhaseChip />
 				{buffer && (
 					<span className="quick-pill buffer" title="Tokens still free in the model's context window">
-						buffer · {buffer} free
+						buffer · {buffer}
 					</span>
 				)}
 				{/* The header pill is hidden below 1100px, so the composer carries the same entry. */}
@@ -179,6 +180,9 @@ export function Composer() {
 					{level ?? "thinking"}
 					{autoCompaction === false && <span className="off-tag">no compact</span>}
 				</button>
+				{/* Queue depth and live voice are appended, never inserted: a pill that appears at
+				    the front would push everything after it sideways mid-turn. */}
+				{queued > 0 && <span className="quick-pill queue">{queued} queued</span>}
 				{liveActive && <span className="quick-pill thinking">live voice</span>}
 			</div>
 			{attachments.length > 0 && (

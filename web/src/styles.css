@@ -319,11 +319,13 @@ kbd {
 	position: relative;
 }
 
-/* spine segment: draws down from the previous row */
+/* spine segment: draws down from the previous row. The x is the centred column's left edge,
+   clamped so the rail stays inside the 16px gutter on a phone: below ~752px the column is
+   wider than the viewport, so the unclamped calc landed off-screen and the timeline vanished. */
 .row::before {
 	content: "";
 	position: absolute;
-	left: calc(50% - var(--column-max) / 2 + 3px);
+	left: max(9px, calc(50% - var(--column-max) / 2 + 3px));
 	top: -14px;
 	bottom: -16px;
 	width: 1px;
@@ -341,7 +343,7 @@ kbd {
 .row > .message::before {
 	content: "";
 	position: absolute;
-	left: calc(50% - var(--column-max) / 2 - 7px);
+	left: max(2px, calc(50% - var(--column-max) / 2 - 7px));
 	top: 6px;
 	width: 7px;
 	height: 7px;
@@ -351,13 +353,15 @@ kbd {
 	animation: node-in 120ms var(--ease-out) calc(var(--i, 0) * 55ms + 40ms) forwards;
 }
 
-/* stub: the branch from the point to the card */
+/* stub: the branch from the point to the card. Both ends are the same two edges the rail and
+   the text use, so the stub always stops exactly where the text begins: on a phone that is the
+   16px padding, on a desktop the column's padding. No breakpoint is involved. */
 .row > .message::after {
 	content: "";
 	position: absolute;
-	left: calc(50% - var(--column-max) / 2 - 1px);
+	left: max(8px, calc(50% - var(--column-max) / 2 - 1px));
+	width: calc(max(16px, 50% - var(--column-max) / 2 + 16px) - max(8px, calc(50% - var(--column-max) / 2 - 1px)));
 	top: 9px;
-	width: 17px;
 	height: 1px;
 	background: var(--border);
 	transform: scaleX(0);
@@ -2237,9 +2241,12 @@ main {
 }
 
 /* Phase chip: the single "what is omp doing" surface. Colour comes from --ph, so the chip, the
-   strip and the composer ring always agree. */
+   strip and the composer ring always agree. The width is fixed and the word is ellipsised:
+   "ready" -> "thinking01.2s" changed the box by ~40px and shoved the buffer pill sideways on
+   every phase change, which read as the strip flickering mid-turn. */
 .quick-pill.phase {
 	gap: 7px;
+	width: 156px;
 	min-height: 32px;
 	padding: 0 10px;
 	color: var(--ph);
@@ -2285,18 +2292,35 @@ main {
 }
 
 .quick-pill.phase .pl {
+	min-width: 0;
+	overflow: hidden;
 	color: var(--fg);
 	font-weight: 500;
+	text-overflow: ellipsis;
 }
 
 .quick-pill.phase .pt {
+	margin-left: auto;
 	color: color-mix(in srgb, var(--ph) 72%, var(--muted));
 	font-size: 9.5px;
+	font-variant-numeric: tabular-nums;
 }
 
-.quick-pill.phase .pq {
-	color: var(--muted-fg);
-	font-size: 9.5px;
+/* The buffer reads a number that changes every turn; a tabular box means the digits move,
+   not the pill. Same reason for the fixed width: its neighbours must not reflow. */
+.quick-pill.buffer {
+	justify-content: center;
+	width: 146px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Queue depth appears mid-turn, so it lives at the end of the strip: appended pills push
+   nothing that came before them. */
+.quick-pill.queue {
+	color: var(--fg);
+	background: var(--muted);
+	border-color: color-mix(in srgb, var(--muted-fg) 0.22, transparent);
+	font-variant-numeric: tabular-nums;
 }
 
 @keyframes up {
@@ -3169,31 +3193,60 @@ main {
 		display: none;
 	}
 
+	/* The idle hint is a keyboard reminder and belongs on a desktop. While a turn runs the
+	   same line says how to steer and how to stop, which a phone needs as much as a PC does,
+	   so it comes back exactly when it has something to say. */
+	.app[data-phase] .hint {
+		display: block;
+	}
+
+	/* The tool intent and the command description are the only place a phone could read what
+	   the row is about; hiding them made the same card mean less here than on a desktop. They
+	   truncate instead, which the desktop layout already does at its own widths. */
 	.tool-head {
 		gap: 6px;
 		padding: 7px 10px;
 	}
 
-	.tool-intent {
-		display: none;
-	}
-
 	.palette .s {
-		display: none;
+		max-width: 26vw;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.att-meta b {
 		max-width: 34vw;
 	}
 
+	/* The strip is the same three pills as a desktop, at phone widths. Fixed boxes, so a phase
+	   change still cannot move its neighbours. */
+	.quick {
+		gap: 5px;
+	}
+
+	.quick-pill.phase {
+		width: 132px;
+	}
+
+	.quick-pill.buffer {
+		width: 104px;
+	}
+
 	.quick {
 		margin-bottom: 5px;
 	}
+}
 
-	/* the context ring in the composer already carries this number; the strip keeps the
-	   reasoning pill fully visible instead of scrolling it out of view */
+/* A 320px viewport leaves 296px for the strip: 132 + 104 + 55 plus two 5px gaps is 5px over,
+   which clipped the reasoning pill. Tighten the two fixed boxes instead of dropping one: a
+   phone should show the same three pills as a desktop. */
+@media (max-width: 360px) {
+	.quick {
+		gap: 4px;
+	}
+
 	.quick-pill.buffer {
-		display: none;
+		width: 98px;
 	}
 }
 
@@ -3294,6 +3347,9 @@ main {
 
 	.app[data-phase] .composer-box::after {
 		animation: none;
+		/* Without the animation the element keeps its scaleX(0) start state, which removed the
+		   rail entirely for anyone who asked for less motion. */
+		transform: none;
 		background: var(--ph);
 	}
 
@@ -3589,11 +3645,9 @@ main {
 		0 0 24px -8px var(--ph);
 }
 
-/* A masked conic repaints every frame. On touch, a solid phase ring says the same for free. */
-.app[data-touch="true"][data-phase] .composer-box::after {
-	animation: none;
-	background: var(--border);
-}
+/* A masked conic repaints every frame; this rail is one scaleX on a pseudo-element, which is
+   the same cost on a phone. It used to be flattened to a static border on touch, which is why
+   the composer read as less alive here than on a desktop. */
 
 /* At 360px the context badge is the first thing to go: the model name still identifies the row. */
 @media (max-width: 420px) {
